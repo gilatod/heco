@@ -1,0 +1,17 @@
+spin_manifest_version = 2
+
+[application]
+name = "test"
+version = "0.1.0"
+authors = ["Phlamcenth Sicusa <sicusa@gilatod.art>"]
+description = "Your first Fermyon Cloud application"
+
+[[trigger.http]]
+route = "/..."
+component = "cloudstart"
+executor = { type = "wagi" }
+
+[component.cloudstart]
+source = "dist/my-project-exe.wasm"
+[component.cloudstart.build]
+command = "earthly +optimized --target=my-project-exe"

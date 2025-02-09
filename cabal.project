@@ -1,0 +1,29 @@
+multi-repl: True
+packages: .
+
+-- index-state: 2024-11-15T08:25:42Z
+allow-newer:
+  ghc,
+  base,
+  bytestring,
+  Cabal,
+  containers,
+  deepseq,
+  filepath,
+  ghc-prim,
+  template-haskell,
+  text,
+  time,
+
+if arch(wasm32)
+  -- Required for TemplateHaskell. When using wasm32-wasi-cabal from
+  -- ghc-wasm-meta, this is superseded by the global cabal.config.
+  shared: True
+
+  -- https://github.com/haskellari/time-compat/issues/37
+  -- Older versions of time don't build on WASM.
+  constraints: time installed
+  allow-newer: time
+
+package aeson
+  flags: -ordered-keymap

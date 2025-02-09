@@ -1,0 +1,130 @@
+cabal-version: 3.0
+
+-- This file has been generated from package.yaml by hpack version 0.37.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           ae
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/sicusa/ae#readme>
+homepage:       https://github.com/sicusa/ae#readme
+bug-reports:    https://github.com/sicusa/ae/issues
+author:         Phlamcenth Sicusa
+maintainer:     sicusa@gilatod.art
+copyright:      2024 Phlamcenth Sicusa
+license:        BSD-3-Clause
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+  type: git
+  location: https://github.com/sicusa/ae
+
+common defaults
+  default-extensions:
+    BlockArguments
+    LexicalNegation
+    RecordWildCards
+    OverloadedRecordDot
+    OverloadedLabels
+    OverloadedStrings
+    DuplicateRecordFields
+    NoFieldSelectors
+    TypeFamilies
+    TemplateHaskell
+    AllowAmbiguousTypes
+    Strict
+  ghc-options:
+    -Wall
+    -Wunused-packages
+    -Wno-name-shadowing
+    -Wredundant-constraints
+    -fplugin=Effectful.Plugin
+  build-depends:
+    base,
+    template-haskell,
+    pointed,
+    rank1dynamic,
+    effectful,
+    effectful-core,
+    effectful-th,
+    effectful-plugin,
+    containers,
+    unordered-containers,
+    text,
+    bytestring,
+    time,
+    uuid,
+    data-default,
+    hashable
+
+library ae-sia
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: ae-sia
+  exposed-modules:
+    Ae.Sia,
+    Ae.Sia.Types,
+    Ae.Sia.SiaQuery,
+    Ae.Sia.SiaQuery.Entity,
+    Ae.Sia.SiaWorld,
+    Ae.Sia.SiaCompute
+
+library ae-sinta
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: ae-sinta
+  exposed-modules:
+    Ae.Sinta,
+    Ae.Sinta.TH,
+    Ae.Sinta.Prelude,
+    Ae.Sinta.Internal.Core,
+    Ae.Sinta.Internal.Types,
+
+library heco-auth
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: heco-auth
+  exposed-modules:
+    Heco.Data.Privilege,
+    Heco.Data.AuthGroup,
+    Heco.Data.AuthError,
+    Heco.Data.User,
+    Heco.Data.LoginConfig,
+    Heco.Data.Session,
+    Heco.Effectful.PrivilegeService,
+    Heco.Effectful.AuthService,
+    Heco.Effectful.AuthService.Ldap,
+    Heco.Effectful.UserService,
+    Heco.Effectful.SessionService
+  build-depends:
+    ldap-client,
+    lrucaching
+
+executable my-project-exe
+  import: defaults
+  main-is: Main.hs
+  hs-source-dirs: app
+  ghc-options: -O2
+  default-language: GHC2024
+  build-depends:
+    ae-sia,
+    ae-sinta,
+    heco-auth
+  if os(wasi)
+      ghc-options:
+        -no-hs-main
+        -optl-mexec-model=reactor
+        "-optl-Wl,--export=hs_init,--export=myMain"
+
+test-suite my-project-test
+  import: defaults
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  build-depends:
+    my-project
+  default-language: GHC2024
+  hs-source-dirs: test
