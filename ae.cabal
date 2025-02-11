@@ -84,21 +84,20 @@ library ae-sinta
     Ae.Sinta.Internal.Core,
     Ae.Sinta.Internal.Types,
 
-library heco-auth
+library heco-account
   import: defaults
   default-language: GHC2024
-  hs-source-dirs: heco-auth
+  hs-source-dirs: heco-account
   exposed-modules:
     Heco.Data.Privilege,
     Heco.Data.AuthGroup,
-    Heco.Data.AuthError,
+    Heco.Data.AccountError,
     Heco.Data.User,
     Heco.Data.LoginConfig,
     Heco.Data.Session,
     Heco.Effectful.PrivilegeService,
-    Heco.Effectful.AuthService,
-    Heco.Effectful.AuthService.Ldap,
-    Heco.Effectful.UserService,
+    Heco.Effectful.AccountService,
+    Heco.Effectful.AccountService.Ldap,
     Heco.Effectful.SessionService
   build-depends:
     ldap-client,
@@ -113,7 +112,7 @@ executable my-project-exe
   build-depends:
     ae-sia,
     ae-sinta,
-    heco-auth
+    heco-account
   if os(wasi)
       ghc-options:
         -no-hs-main
