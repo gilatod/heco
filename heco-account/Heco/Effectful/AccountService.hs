@@ -1,19 +1,28 @@
 module Heco.Effectful.AccountService where
 
-import Heco.Data.LoginConfig (LoginConfig)
 import Heco.Data.Session (Session, SessionToken)
+import Heco.Data.User (Username, User)
 
 import Effectful (Effect)
 import Effectful.TH (makeEffect)
-import Heco.Data.User (Username)
 import Data.Text (Text)
 
+data LoginOps
+    = UsernameLoginOps
+        { username :: Text
+        , password :: Text }
+    | EmailLoginOps
+        { email :: Text
+        , password :: Text }
+    deriving (Eq, Show)
+
 data AccountService :: Effect where
-    Login :: LoginConfig -> AccountService m SessionToken
+    Login :: LoginOps -> AccountService m SessionToken
     Logout :: SessionToken -> AccountService m ()
 
-    GetSession :: SessionToken -> AccountService m Session
     GetSessions :: AccountService m [Session]
+    GetSession :: SessionToken -> AccountService m Session
+    GetUser :: SessionToken -> AccountService m User
 
     SetUsername :: SessionToken -> Username -> AccountService m ()
     SetNickname :: SessionToken -> Text -> AccountService m ()

@@ -5,7 +5,7 @@ import Heco.Data.AuthGroup (AuthGroup(..), GroupName)
 import Effectful (Effect, Eff)
 import Effectful.TH (makeEffect)
 import Effectful.Dispatch.Dynamic (reinterpret)
-import Effectful.State.Static.Local (evalState, get, put)
+import Effectful.State.Static.Shared (evalState, get, modify, state)
 
 data PrivilegeService :: Effect where
     GetAuthGroups :: PrivilegeService m [AuthGroup]
@@ -18,20 +18,15 @@ runSimplePrivilegeService ::
     [AuthGroup]
     -> Eff (PrivilegeService : es) a
     -> Eff es a
-runSimplePrivilegeService groups = reinterpret (evalState groups) \_ -> \case
+runSimplePrivilegeService initialGroups = reinterpret (evalState initialGroups) \_ -> \case
     GetAuthGroups -> get
-    SetAuthGroup group -> do
-        groups <- get
+    SetAuthGroup group -> modify \groups ->
         let (lhs, rhs) = span (\g -> g.name /= group.name) groups
-        case rhs of
-            [] -> put (group:groups)
-            (_:rs) -> do
-                put $ lhs ++ [group] ++ rs
-    RemoveAuthGroup groupName -> do
-        groups <- get
+        in case rhs of
+            [] -> group:groups
+            (_:rs) -> lhs ++ [group] ++ rs
+    RemoveAuthGroup groupName -> state \groups ->
         let (lhs, rhs) = span (\g -> g.name /= groupName) groups
-        case rhs of
-            [] -> pure False
-            (_:rs) -> do
-                put $ lhs ++ rs
-                pure True
+        in case rhs of
+            [] -> (False, groups)
+            (_:rs) -> (True, lhs ++ rs)

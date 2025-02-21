@@ -1,51 +1,60 @@
-module Heco.Effectful.AccountService.Ldap where
+module Heco.Effectful.AccountService.Ldap
+    ( -- * Data types
+      LdapUserAttributes(..)
+    , LdapGroupMemberIdentification(..)
+    , LdapGroupAttributes(..)
+    , LdapOps(..)
+      -- * Account API
+    , runLdapAccountService
+    , runLdapAccountServiceEx
+      -- * Re-exports
+    , Host(..)
+    , PortNumber
+    , Dn(..)
+    , Password(..)
+    , AttrValue
+    ) where
 
 import Heco.Data.AccountError (AccountError(..))
-import Heco.Data.LoginConfig (LoginConfig(..))
-import Heco.Data.User (User(..), Username (Username))
-import Heco.Data.AuthGroup (AuthGroup(..), GroupName (GroupName))
-import Heco.Data.Session (Session(..), SessionToken (SessionToken))
-import Heco.Effectful.PrivilegeService (runSimplePrivilegeService)
-import Heco.Effectful.AccountService (AccountService(..), login, getSession, setNickname)
+import Heco.Data.User (User(..), Username(Username))
+import Heco.Data.AuthGroup (GroupName(GroupName))
+import Heco.Data.Session (Session(..), SessionToken(SessionToken))
+import Heco.Events.AccountEvent (AccountEvent(..))
+import Heco.Effectful.AccountService (AccountService(..), LoginOps(..))
+import Heco.Effectful.Event (Event, trigger, runEvent)
 
-import Effectful ((:>), Eff, IOE, MonadIO (liftIO), runEff)
-import Effectful.Error.Dynamic (Error, throwError, runError)
+import Effectful ((:>), Eff, IOE, MonadIO(liftIO))
+import Effectful.Error.Dynamic (Error, throwError, HasCallStack, runErrorNoCallStack)
 import Effectful.Dispatch.Dynamic (reinterpret)
-import Effectful.State.Static.Shared (State, evalState, modifyM, stateM)
+import Effectful.State.Static.Shared (State, evalState, modify, get)
+import Effectful.Exception (SomeException)
 
 import Ldap.Client
-    ( Host(Tls),
+    ( Host,
       PortNumber,
       Dn(..),
       Password(..),
       AttrValue,
       Ldap,
-      LdapError,
       Filter((:=), And),
       SearchEntry(..),
       Attr(Attr),
-      with,
-      bind,
-      search,
       ResultCode(InvalidCredentials),
-      ResponseError(ResponseErrorCode), Operation (Replace), modify )
+      ResponseError(ResponseErrorCode), Operation (Replace) )
+import Ldap.Client qualified as Ldap
 
 import Data.Text (Text)
 import Data.List.NonEmpty (NonEmpty(..), (<|))
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
-import Data.Default (def)
 import Data.Maybe (listToMaybe)
-import Data.LruCache.IO (StripedLruHandle, newStripedLruHandle, stripedCached)
 import Data.UUID.V4 (nextRandom)
 import Data.Time (getCurrentTime)
 import Data.HashSet (HashSet)
-import qualified Data.HashSet as HashSet
+import Data.HashSet qualified as HashSet
 import Data.HashMap.Strict (HashMap, fromList)
-import qualified Data.HashMap.Strict as HashMap
+import Data.HashMap.Strict qualified as HashMap
 import Data.Maybe (mapMaybe)
 import Control.Exception (catch, throw)
-import Control.Arrow (Arrow(second))
-import Effectful.Exception (SomeException)
 
 data LdapUserAttributes = LdapUserAttributes
     { username :: Text
@@ -63,7 +72,7 @@ data LdapGroupAttributes = LdapGroupAttributes
     , member :: Text }
     deriving (Eq, Show)
 
-data LdapConfig = LdapConfig
+data LdapOps = LdapOps
     { host :: Host
     , port :: PortNumber
     , domain :: Dn
@@ -80,25 +89,24 @@ data LdapConfig = LdapConfig
     , groupMemberIdentification :: LdapGroupMemberIdentification }
     deriving (Show)
 
-type LdapResult a = IO (Either LdapError a)
 type LdapAttrMap = HashMap Text [Text]
 
-withLdap :: LdapConfig -> (Ldap -> IO a) -> IO a
-withLdap config f = 
+withLdap :: LdapOps -> (Ldap -> IO a) -> IO a
+withLdap ops f = 
     either throwUnhandledError id <$>
-        with config.host config.port \l -> do
+        Ldap.with ops.host ops.port \l -> do
             f l `catch` \(e :: ResponseError) ->
-                throw . BackendOperationError . show $ e
+                throw . AccountBackendError . show $ e
     where
         throwUnhandledError = throw . UnhandledAccountError . show
 
-withLdapDefaultBind :: LdapConfig -> (Ldap -> IO a) -> IO a
-withLdapDefaultBind config f = withLdap config \l ->
-    bind l config.domain config.password >> f l
+withLdapDefaultBind :: LdapOps -> (Ldap -> IO a) -> IO a
+withLdapDefaultBind ops f = withLdap ops \l ->
+    Ldap.bind l ops.domain ops.password >> f l
 
 searchEntries :: Ldap -> Dn -> AttrValue -> [(Text, AttrValue)] -> Filter -> IO [SearchEntry]
 searchEntries ldap base objectClass extra filter =
-    search ldap base mempty
+    Ldap.search ldap base mempty
         (And $ Attr "objectClass" := objectClass
             <| filter :| map (\(k, v) -> Attr k := v) extra) []
 
@@ -112,109 +120,104 @@ entryToMap (SearchEntry _ attrList) =
     where
         convertPair ((Attr attr), values) = (attr, map decodeUtf8 values)
 
-data UserDetail = UserDetail
-    { tokens :: HashSet SessionToken
+data ActiveUser = ActiveUser
+    { user :: User
+    , tokens :: HashSet SessionToken
     , dn :: Dn
     , password :: Password }
 
 data ServiceState = ServiceState
-    { config :: LdapConfig
+    { ops :: LdapOps
     , sessions :: HashMap SessionToken Session
-    , userDetails :: HashMap Username UserDetail
-    , userCache :: StripedLruHandle Text User }
+    , activeUsers :: HashMap Username ActiveUser }
 
-type ServiceStateEff = State (Maybe ServiceState)
+createServiceState :: LdapOps -> Eff es ServiceState
+createServiceState ops = do
+    pure ServiceState
+        { ops = ops
+        , sessions = HashMap.empty
+        , activeUsers = HashMap.empty }
 
-getState ::
-    (IOE :> es, ServiceStateEff :> es)
-    => LdapConfig
-    -> Eff es ServiceState
-getState config = stateM \case
-    Nothing -> newState >>= ret
-    Just s -> ret s
-    where
-        ret s = pure (s, Just s)
-        stripCount = 8
-        newState = ServiceState config HashMap.empty HashMap.empty
-            <$> liftIO (newStripedLruHandle stripCount (config.uesrCacheSize `div` stripCount))
-
-modifyServiceState ::
-    (Error AccountError :> es, ServiceStateEff :> es)
-    => (ServiceState -> Eff es ServiceState) -> Eff es ()
-modifyServiceState f = modifyM \case
-    Just s -> Just <$> f s
-    Nothing -> throwError $ BackendInternalError "empty service state"
-
-serviceState ::
-    (Error AccountError :> es, ServiceStateEff :> es)
-    => (ServiceState -> Eff es (a, ServiceState)) -> Eff es a
-serviceState f = stateM \case
-    Just s -> second Just <$> f s
-    Nothing -> throwError $ BackendInternalError "empty service state"
-
-getUserDetail ::
+getActiveUser ::
     Error AccountError :> es
-    => ServiceState -> Username -> Eff es UserDetail
-getUserDetail serviceState username =
+    => ServiceState -> Username -> Eff es ActiveUser
+getActiveUser serviceState username =
     maybe (throwError UnregisteredUserError) pure $
-        HashMap.lookup username serviceState.userDetails
+        HashMap.lookup username serviceState.activeUsers
+
+modifyActiveUser ::
+    State ServiceState :> es
+    => Username -> (ActiveUser -> ActiveUser) -> Eff es ()
+modifyActiveUser username f = modify \s ->
+    let (maybeRenamedUser, activeUsers') =
+            HashMap.alterF alterActiveUser username s.activeUsers
+        activeUsers'' = 
+            case maybeRenamedUser of
+                Just au -> HashMap.insert au.user.username au activeUsers'
+                Nothing -> activeUsers'
+    in s { activeUsers = activeUsers'' }
+    where
+        alterActiveUser (Just au) =
+            let au' = f au
+            in if au'.user.username == username
+                then (Nothing, Just au')
+                else (Just au', Nothing)
+        alterActiveUser Nothing = (Nothing, Nothing)
 
 registerSession ::
-    (Error AccountError :> es, ServiceStateEff :> es)
-    => Dn -> Password -> Session -> Eff es ()
-registerSession dn password session =
-    modifyServiceState \s -> pure s
+    State ServiceState :> es
+    => User -> Dn -> Password -> Session -> Eff es Session
+registerSession user dn password session = do
+    modify \s -> s
         { sessions = HashMap.insert session.token session s.sessions
-        , userDetails = HashMap.alter alterUserDetail session.user.username s.userDetails }
+        , activeUsers = HashMap.alter alterActiveUser session.username s.activeUsers }
+    pure session
     where
-        alterUserDetail = \case
-            Just ud -> Just ud
-                { tokens = HashSet.insert session.token ud.tokens }
-            Nothing -> Just UserDetail
-                { dn = dn
+        alterActiveUser = \case
+            Just au -> Just au
+                { tokens = HashSet.insert session.token au.tokens }
+            Nothing -> Just ActiveUser
+                { user = user
+                , dn = dn
                 , tokens = HashSet.singleton session.token
                 , password = password }
 
 unregisterSession ::
-    (Error AccountError :> es, ServiceStateEff :> es)
-    => Session -> Eff es ()
-unregisterSession session =
-    modifyServiceState \s -> pure s
+    State ServiceState :> es
+    => Session -> Eff es Session
+unregisterSession session = do
+    modify \s -> s
         { sessions = HashMap.delete session.token s.sessions
-        , userDetails = HashMap.update
-            updateUserDetail session.user.username s.userDetails }
+        , activeUsers = HashMap.update
+            updateActiveUser session.username s.activeUsers }
+    pure session
     where
-        updateUserDetail ud = Just ud
+        updateActiveUser ud = Just ud
             { tokens = HashSet.delete session.token ud.tokens }
 
 requireSessionAndState ::
-    (IOE :> es, Error AccountError :> es, ServiceStateEff :> es)
+    (Error AccountError :> es, State ServiceState :> es)
     => SessionToken -> Eff es (Session, ServiceState)
-requireSessionAndState token = serviceState \s ->
+requireSessionAndState token = get >>= \s ->
     case HashMap.lookup token s.sessions of
-        Just session -> do
-            now <- liftIO $ getCurrentTime
-            let session' = session { updateTime = now }
-                sessions' = HashMap.insert session.token session' s.sessions
-                s' = s { sessions = sessions' }
-            pure ((session', s'), s')
+        Just session -> pure (session, s)
         Nothing -> throwError InvalidSessionToken
  
 requireSession ::
-    (IOE :> es, Error AccountError :> es, ServiceStateEff :> es)
+    (Error AccountError :> es, State ServiceState :> es)
     => SessionToken -> Eff es Session
 requireSession = fmap fst . requireSessionAndState
 
 searchUserGroups :: Ldap -> ServiceState -> Filter -> IO [GroupName]
 searchUserGroups ldap state filter = do
-    let config = state.config
+    let ops = state.ops
     groups <- searchEntries ldap
-        config.groupBase
-        config.groupObjectClass
-        config.groupExtra
+        ops.groupBase
+        ops.groupObjectClass
+        ops.groupExtra
         filter
     pure $ flip mapMaybe groups \(SearchEntry _ entries) ->
-        case lookup (Attr config.groupAttrs.name) entries of
+        case lookup (Attr ops.groupAttrs.name) entries of
             Nothing -> Nothing
             Just [] -> Nothing
             Just (v:_) -> Just $ GroupName (decodeUtf8 v)
@@ -222,19 +225,18 @@ searchUserGroups ldap state filter = do
 searchUser :: Ldap -> ServiceState -> Filter -> IO (Maybe (Dn, User))
 searchUser ldap state filter = do
     user <- searchEntry ldap
-        config.userBase
-        config.userObjectClass
-        config.userExtra
+        ops.userBase
+        ops.userObjectClass
+        ops.userExtra
         filter
-    putStrLn $ show user
     case user of
         Nothing -> pure Nothing
         Just es@(SearchEntry (Dn dn) _) ->
-            Just . (Dn dn,) <$> stripedCached state.userCache dn (createUserCache es dn)
+            Just . (Dn dn,) <$> createUserRecord es dn
     where
-        config = state.config
-        createUserCache es dn = do
-            let attrs = config.userAttrs
+        ops = state.ops
+        createUserRecord es dn = do
+            let attrs = ops.userAttrs
                 attrMap = entryToMap es
                 getAttr k defaultValue =
                     case HashMap.lookup k attrMap of
@@ -243,8 +245,8 @@ searchUser ldap state filter = do
                         Just (v:_) -> v
                 username = getAttr attrs.username "[unknown]"
             groups <- searchUserGroups ldap state $
-                Attr config.groupAttrs.member :=
-                    case config.groupMemberIdentification of
+                Attr ops.groupAttrs.member :=
+                    case ops.groupMemberIdentification of
                         GroupMemberIdentifiedByDn -> encodeUtf8 dn
                         GroupMemberIdentifiedByUsername -> encodeUtf8 username
             pure User
@@ -254,11 +256,11 @@ searchUser ldap state filter = do
                 , groups = groups }
 
 bindUser :: Ldap -> Dn -> Password -> IO ()
-bindUser ldap dn password = bind ldap dn password
+bindUser ldap dn password = Ldap.bind ldap dn password
     `catch` \case
         (ResponseErrorCode _ InvalidCredentials _ _) ->
             throw IncorrectPasswordError
-        e -> throw . BackendOperationError . show $ e
+        e -> throw . AccountBackendError . show $ e
 
 adapt :: (Error AccountError :> es, IOE :> es) => IO b -> Eff es b
 adapt m = do
@@ -271,42 +273,41 @@ adapt m = do
 
 data UserOperationContext = UserOperationContext
     { serviceState :: ServiceState
-    , userDetail :: UserDetail
+    , activeUser :: ActiveUser
     , session :: Session }
 
 withUser ::
-    (IOE :> es, Error AccountError :> es, ServiceStateEff :> es)
-    => LdapConfig -> SessionToken
+    (IOE :> es, Error AccountError :> es, State ServiceState :> es)
+    => LdapOps -> SessionToken
     -> (Ldap -> UserOperationContext -> IO a)
     -> Eff es a
-withUser config token f = do
+withUser ops token f = do
     (session, state) <- requireSessionAndState token
-    ud <- getUserDetail state session.user.username
-    adapt $ withLdap config \l -> do
+    ud <- getActiveUser state session.username
+    adapt $ withLdap ops \l -> do
         bindUser l ud.dn ud.password
         f l UserOperationContext
             { serviceState = state
-            , userDetail = ud
+            , activeUser = ud
             , session = session }
 
-convertLoginConfig :: LdapConfig -> LoginConfig -> (Filter, Password)
-convertLoginConfig config = \case
-    UsernameLoginConfig username pwd ->
-        (Attr config.userAttrs.username := encodeUtf8 username, Password $ encodeUtf8 pwd)
-    EmailLoginConfig email pwd ->
-        (Attr config.userAttrs.email := encodeUtf8 email, Password $ encodeUtf8 pwd)
+convertLoginOps :: LdapOps -> LoginOps -> (Filter, Password)
+convertLoginOps ops = \case
+    UsernameLoginOps username pwd ->
+        (Attr ops.userAttrs.username := encodeUtf8 username, Password $ encodeUtf8 pwd)
+    EmailLoginOps email pwd ->
+        (Attr ops.userAttrs.email := encodeUtf8 email, Password $ encodeUtf8 pwd)
 
 runLdapAccountService ::
-    (IOE :> es, Error AccountError :> es)
-    => LdapConfig
+    (HasCallStack, IOE :> es, Event AccountEvent :> es, Error AccountError :> es)
+    => LdapOps
     -> Eff (AccountService : es) a
     -> Eff es a
-runLdapAccountService config = reinterpret (evalState emptyState) \_ -> \case
-    Login loginConfig -> do
-        s <- getState config
-
-        (dn, user, password) <- adapt $ withLdapDefaultBind config \l ->
-            let (userFilter, password) = convertLoginConfig config loginConfig
+runLdapAccountService ops = reinterpret evalServiceState \_ -> \case
+    Login loginOps -> do
+        s <- get
+        (dn, user, password) <- adapt $ withLdapDefaultBind ops \l ->
+            let (userFilter, password) = convertLoginOps ops loginOps
             in searchUser l s userFilter
                 >>= maybe (throw UnregisteredUserError) \(dn, user) -> do
                     bindUser l dn password
@@ -314,108 +315,80 @@ runLdapAccountService config = reinterpret (evalState emptyState) \_ -> \case
 
         token <- SessionToken <$> liftIO nextRandom
         time <- liftIO getCurrentTime
-
-        registerSession dn password Session
-            { user = user
+        session <- registerSession user dn password Session
+            { username = user.username
             , token = token
-            , createTime = time
-            , updateTime = time }
+            , createTime = time }
+
+        trigger $ OnAccountLogin session
         pure token
 
-    Logout token ->
-        requireSession token >>= unregisterSession
+    Logout token -> do
+        session <- requireSession token >>= unregisterSession
+        trigger $ OnAccountLogout session
 
+    GetSessions ->
+        get >>= \s -> pure . HashMap.elems $ s.sessions
     GetSession token ->
         requireSession token
-    GetSessions ->
-        getState config >>= \s -> pure . HashMap.elems $ s.sessions
+    GetUser token -> do
+        (session, state) <- requireSessionAndState token
+        case HashMap.lookup session.username state.activeUsers of
+            Just au -> pure au.user
+            Nothing -> throwError $ BackendInternalError "user not found"
 
-    SetUsername token newName@(Username newNameText) -> do
-        (newDn, prevUsername) <- withUser config token \l ctx -> do
-            let ud = ctx.userDetail
+    SetUsername token name'@(Username nameText') -> do
+        (dn', prevUsername, session) <- withUser ops token \l ctx -> do
+            let ud = ctx.activeUser
                 userDn = ud.dn
-                username@(Username usernameText) = ctx.session.user.username
+                name@(Username nameText) = ctx.session.username
 
             bindUser l userDn ud.password
-            modify l userDn
-                [Replace (Attr config.userAttrs.username) [encodeUtf8 newNameText]]
+            Ldap.modify l userDn
+                [Replace (Attr ops.userAttrs.username) [encodeUtf8 nameText']]
 
-            bind l config.domain config.password
+            Ldap.bind l ops.domain ops.password
             searchUser l ctx.serviceState
-                (Attr config.userAttrs.username := encodeUtf8 usernameText)
+                (Attr ops.userAttrs.username := encodeUtf8 nameText)
                 >>= maybe (throw $ BackendInternalError "user not found")
-                    (pure . (,username) . fst)
+                    (pure . (, name, ctx.session) . fst)
 
-        modifyServiceState \s -> do
-            let (maybeUs, userDetails') =
-                    HashMap.alterF (\x -> (x, Nothing)) prevUsername s.userDetails
-                userDetails'' = 
-                    case maybeUs of
-                        Just ud -> HashMap.insert newName (ud { dn = newDn }) userDetails'
-                        Nothing -> s.userDetails
-            pure s { userDetails = userDetails'' }
-             
-    SetNickname token nickname ->
-        withUser config token \l ctx -> do
-            modify l ctx.userDetail.dn
-                [Replace (Attr config.userAttrs.nickname) [encodeUtf8 nickname]]
+        modifyActiveUser prevUsername \au -> au
+            { user = au.user { username = name' }
+            , dn = dn' }
 
-    SetEmail token email ->
-        withUser config token \l ctx -> do
-            modify l ctx.userDetail.dn
-                [Replace (Attr config.userAttrs.email) [encodeUtf8 email]]
+        trigger $ OnAccountUsernameChanged session name'
 
+    SetNickname token nickname -> do
+        session <- withUser ops token \l ctx -> do
+            Ldap.modify l ctx.activeUser.dn
+                [Replace (Attr ops.userAttrs.nickname) [encodeUtf8 nickname]]
+            pure ctx.session
+
+        modifyActiveUser session.username \au -> au
+            { user = au.user { nickname = nickname } }
+
+        trigger $ OnAccountNicknameChanged session nickname
+
+    SetEmail token email -> do
+        session <- withUser ops token \l ctx -> do
+            Ldap.modify l ctx.activeUser.dn
+                [Replace (Attr ops.userAttrs.email) [encodeUtf8 email]]
+            pure ctx.session
+
+        modifyActiveUser session.username \au -> au
+            { user = au.user { email = email } }
+
+        trigger $ OnAccountEmailChanged session email
     where
-        emptyState = Nothing :: Maybe ServiceState
+        evalServiceState e = do
+            s <- createServiceState ops
+            evalState s e
 
-test :: IO ()
-test = do
-    let run = runEff
-            . runError
-            . runSimplePrivilegeService groups
-            . runLdapAccountService config
-    res <- run do
-        token <- login $ UsernameLoginConfig "test" "Holders-instance-14-sulfur"
-        setNickname token "newName"
-        getSession token
-        --logout session.token
-    putStrLn $ show res
-    pure ()
-    where
-        groups =
-            [ AuthGroup
-                { name = "admin"
-                , description = "Administrators"
-                , privileges = HashSet.empty }
-            , AuthGroup
-                { name = "editor"
-                , description = "Editors"
-                , privileges = HashSet.empty }
-            , AuthGroup
-                { name = "author"
-                , description = "Authors"
-                , privileges = HashSet.empty }
-            , AuthGroup
-                { name = "blocked"
-                , description = "Blocked users"
-                , privileges = HashSet.empty } ]
-        config = LdapConfig
-            { host = Tls "auth.gilatod.art" def
-            , port = 636
-            , domain = Dn "cn=readonly,dc=gilatod,dc=art"
-            , password = Password "readonly"
-            , userBase = Dn "ou=people,dc=gilatod,dc=art"
-            , userObjectClass = "posixAccount"
-            , userExtra = []
-            , userAttrs = LdapUserAttributes
-                { username = "uid"
-                , nickname = "displayName"
-                , email = "mail" }
-            , uesrCacheSize = 50
-            , groupBase = Dn "ou=groups,dc=gilatod,dc=art"
-            , groupObjectClass = "posixGroup"
-            , groupExtra = []
-            , groupAttrs = LdapGroupAttributes
-                { name = "cn"
-                , member = "uniqueMember" }
-            , groupMemberIdentification = GroupMemberIdentifiedByDn }
+runLdapAccountServiceEx ::
+    (HasCallStack, IOE :> es)
+    => LdapOps
+    -> Eff (AccountService : Event AccountEvent : Error AccountError : es) a
+    -> Eff es (Either AccountError a)
+runLdapAccountServiceEx ops = 
+    runErrorNoCallStack . runEvent . runLdapAccountService ops

@@ -9,7 +9,7 @@ data AccountError
     | UnregisteredUserError
     | IncorrectPasswordError
     | BackendInternalError String
-    | BackendOperationError String
+    | AccountBackendError String
     | UnhandledAccountError String
     deriving (Eq, Show, Typeable)
 

@@ -41,6 +41,7 @@ common defaults
     -Wall
     -Wunused-packages
     -Wno-name-shadowing
+    -Wno-ambiguous-fields
     -Wredundant-constraints
     -fplugin=Effectful.Plugin
   build-depends:
@@ -83,6 +84,13 @@ library ae-sinta
     Ae.Sinta.Prelude,
     Ae.Sinta.Internal.Core,
     Ae.Sinta.Internal.Types,
+  
+library heco-event
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: heco-event
+  exposed-modules:
+    Heco.Effectful.Event
 
 library heco-account
   import: defaults
@@ -93,15 +101,34 @@ library heco-account
     Heco.Data.AuthGroup,
     Heco.Data.AccountError,
     Heco.Data.User,
-    Heco.Data.LoginConfig,
     Heco.Data.Session,
+    Heco.Events.AccountEvent,
     Heco.Effectful.PrivilegeService,
     Heco.Effectful.AccountService,
     Heco.Effectful.AccountService.Ldap,
-    Heco.Effectful.SessionService
+    Heco.Effectful.SessionContext
   build-depends:
     ldap-client,
-    lrucaching
+    lrucaching,
+    heco-event
+
+library heco-language
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: heco-language
+  exposed-modules:
+    Heco.Data.Message,
+    Heco.Data.Role,
+    Heco.Data.LanguageError,
+    Heco.Data.Embeddings,
+    Heco.Events.LanguageEvent,
+    Heco.Effectful.LanguageService,
+    Heco.Effectful.LanguageService.Ollama
+  build-depends:
+    aeson,
+    heco-event,
+    heco-account,
+    http-client
 
 executable my-project-exe
   import: defaults
@@ -110,9 +137,11 @@ executable my-project-exe
   ghc-options: -O2
   default-language: GHC2024
   build-depends:
-    ae-sia,
-    ae-sinta,
-    heco-account
+    heco-event,
+    heco-account,
+    heco-language,
+    ollama-haskell,
+    http-client
   if os(wasi)
       ghc-options:
         -no-hs-main
