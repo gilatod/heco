@@ -46,6 +46,7 @@ common defaults
     -fplugin=Effectful.Plugin
   build-depends:
     base,
+    extra,
     template-haskell,
     pointed,
     rank1dynamic,
@@ -65,7 +66,6 @@ common defaults
     hashable,
     cast,
     aeson,
-    aeson-qq,
     case-insensitive
 
 library heco-common
@@ -143,6 +143,35 @@ library heco-database
     heco-event,
     heco-account,
     http-client
+
+library heco-subjectivity
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: heco-subjectivity
+  exposed-modules:
+    Heco.Data.TimePhase,
+    Heco.Effectful.InternalTimeStream,
+    Heco.Effectful.InternalTimeStream.RingBuffer,
+    Heco.Events.InternalTimeStreamEvent
+  build-depends:
+    heco-common,
+    heco-event,
+    ring-buffer
+
+library heco-ego
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: heco-ego
+  exposed-modules:
+    Heco.Effectful.Ego,
+    Heco.Effectful.Ego.Standard
+  build-depends:
+    heco-common,
+    heco-event,
+    heco-account,
+    heco-language,
+    heco-database,
+    heco-subjectivity
 
 executable my-project-exe
   import: defaults

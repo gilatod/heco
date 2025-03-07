@@ -79,10 +79,21 @@ data MilvusStatusData = MilvusStatusData
 data MilvusStatusResp = MilvusStatusResp
     { code :: Int
     , message :: Maybe Text
-    , _data :: Maybe MilvusStatusData  }
+    , _data :: Maybe MilvusStatusData }
 
 deriveFromJSON defaultAesonOps ''MilvusStatusData
 deriveFromJSON defaultAesonOps ''MilvusStatusResp
+
+data MilvusGetStatsData = MilvusGetStatsData
+    { rowCount :: Int }
+
+data MilvusGetStatsResp = MilvusGetStatsResp
+    { code :: Int
+    , message :: Maybe Text
+    , _data :: Maybe MilvusGetStatsData }
+
+deriveFromJSON defaultAesonOps ''MilvusGetStatsData
+deriveFromJSON defaultAesonOps ''MilvusGetStatsResp
 
 data MilvusInsertOps e = MilvusInsertOps
     { dbName :: Maybe Text
@@ -162,6 +173,13 @@ data MilvusSearchOps = MilvusSearchOps
 deriveToJSON defaultAesonOps ''MilvusSearchExtraParams
 deriveToJSON defaultAesonOps ''MilvusSearchParams
 deriveToJSON defaultAesonOps ''MilvusSearchOps
+
+data MilvusDeleteOps = MilvusDeleteOps
+    { dbName :: Maybe Text
+    , collectionName :: Text
+    , filter :: Text }
+
+deriveToJSON defaultAesonOps ''MilvusDeleteOps
 
 getMilvusSearchParams :: SearchOps -> Maybe MilvusSearchParams
 getMilvusSearchParams ops = get ops.radius ops.rangeFilter
@@ -320,6 +338,12 @@ runMilvusDatabaseService ops = reinterpret evalServiceState \_ -> \case
                 , progress = d.loadProgress
                 , message = maybe "" id d.message }
     
+    GetEntityCount col -> do
+        resp <- collectionRequest @MilvusGetStatsResp ops "/v2/vectordb/collections/get_stats" col
+        case resp._data of
+            Nothing -> throwInvalidResponseError
+            Just d -> pure d.rowCount
+    
     AddEntities col es ->
         setEntitiesImpl ops insertionUrl col getInsertDataIds es
 
@@ -375,8 +399,14 @@ runMilvusDatabaseService ops = reinterpret evalServiceState \_ -> \case
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just es -> pure es
-
-    _ -> undefined
+    
+    DeleteEntities (CollectionName col) filter -> do
+        _ <- milvusPost @MilvusCollectionResp ops "/v2/vectordb/entities/delete"
+            MilvusDeleteOps
+                { dbName = ops.database
+                , collectionName = col
+                , filter = filter }
+        pure ()
 
     where
         evalServiceState e = do

@@ -51,6 +51,7 @@ data DatabaseService :: Effect where
     FlushCollection :: CollectionName -> DatabaseService m ()
     CompactCollection :: CollectionName -> DatabaseService m ()
     GetCollectionLoadState :: CollectionName -> DatabaseService m CollectionLoadState
+    GetEntityCount :: CollectionName -> DatabaseService m Int
 
     AddEntities :: IsEntityData e => CollectionName -> Vector e -> DatabaseService m (VU.Vector EntityId)
     AddEntity :: IsEntityData e => CollectionName -> e -> DatabaseService m EntityId
@@ -61,7 +62,6 @@ data DatabaseService :: Effect where
     QueryEntities :: Entity e => CollectionName -> QueryOps -> DatabaseService m (Vector e)
     SearchEntities :: Entity e => CollectionName -> SearchOps -> DatabaseService m (Vector e)
     DeleteEntities :: CollectionName -> Text -> DatabaseService m ()
-    GetEntityCount :: CollectionName -> DatabaseService m Int
 
 makeEffect ''DatabaseService
 

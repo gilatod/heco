@@ -49,6 +49,7 @@ import Data.Aeson.TH (deriveToJSON, deriveFromJSON)
 
 import Control.Exception (SomeException, catch)
 import GHC.Generics (Generic)
+import Control.Monad.Extra (whenJust)
 
 data OllamaOps = OllamaOps
     { hostUrl :: Text
@@ -113,10 +114,9 @@ runOllamaLanguageService ops = reinterpret evalServiceState \env -> \case
                         else case Aeson.eitherDecode @ChatResp (BSL.fromStrict bs) of
                             Left e -> pure $ Left e
                             Right r -> do
-                                case r.message of
-                                    Nothing -> pure ()
-                                    Just msg -> unlift $ trigger $ OnLanguageChunkReceived token msg
-                                let builder' = builder <> T.encodeUtf8Builder (fromJust r.message).content
+                                whenJust r.message $ unlift . trigger . OnLanguageChunkReceived token
+                                let builder' = builder
+                                        <> T.encodeUtf8Builder (fromJust r.message).content
                                 if r.done
                                     then pure . Right . builderToText $ builder'
                                     else streamResponse builder' response

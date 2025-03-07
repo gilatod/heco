@@ -12,6 +12,7 @@ import Effectful.TH (makeEffect)
 
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import Control.Monad.Extra (whenJust)
 
 data SessionContext ctx :: Effect where
     GetSessionContext :: SessionToken -> SessionContext ctx m ctx
@@ -38,7 +39,7 @@ runSessionContext createCtx releaseCtx = reinterpret evalContextState \_ -> \cas
             listen_ \case
                 OnAccountLogout session -> modifyM \map -> do
                     let (ctx, map') = HashMap.alterF (\ctx -> (ctx, Nothing)) session.token map
-                    maybe (pure ()) (raise . releaseCtx session) ctx
+                    whenJust ctx $ raise . releaseCtx session
                     pure map'
                 _ -> pure()
             e
