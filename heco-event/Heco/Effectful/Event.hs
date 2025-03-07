@@ -4,6 +4,7 @@ import Effectful (Effect, Eff, (:>))
 import Effectful.Dispatch.Dynamic (reinterpret, localSeqUnlift)
 import Effectful.State.Static.Shared (evalState, state, get, modify, State)
 import Effectful.TH (makeEffect)
+import Effectful.Exception (bracket)
 
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
@@ -20,8 +21,13 @@ data Event e :: Effect where
 
 makeEffect ''Event
 
-listen_ :: Event e :> es => (e -> Eff es ()) -> Eff es ()
+listen_ :: Event e :> es
+    => (e -> Eff es ()) -> Eff es ()
 listen_ f = listen f >> pure ()
+
+on :: Event e :> es
+    => Eff es a -> (e -> Eff es ()) -> Eff es a
+on e f = bracket (listen f) unlisten (const e)
 
 data EventState e es = EventState
     (HashMap EventListenerHandle (e -> Eff (State (EventState e es) : es) ())) Int
@@ -39,7 +45,7 @@ runEvent = reinterpret (evalState emptyState) \env -> \case
             let map' = HashMap.delete handle map
             in EventState map' acc
     Trigger e ->
-        get >>= \(EventState m _) -> for_ m ($ e)
+        get >>= \(EventState map _) -> for_ map ($ e)
     where
         emptyState :: EventState e es
         emptyState = EventState HashMap.empty 0

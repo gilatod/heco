@@ -24,7 +24,7 @@ import Heco.Effectful.AccountService (AccountService(..), LoginOps(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful ((:>), Eff, IOE, MonadIO(liftIO))
-import Effectful.Error.Dynamic (Error, throwError, HasCallStack, runErrorNoCallStack)
+import Effectful.Error.Dynamic (Error, throwError, HasCallStack, runError, CallStack)
 import Effectful.Dispatch.Dynamic (reinterpret)
 import Effectful.State.Static.Shared (State, evalState, modify, get)
 import Effectful.Exception (SomeException)
@@ -81,7 +81,6 @@ data LdapOps = LdapOps
     , userObjectClass :: AttrValue
     , userExtra :: [(Text, AttrValue)]
     , userAttrs :: LdapUserAttributes
-    , uesrCacheSize :: Int
     , groupBase :: Dn
     , groupObjectClass :: AttrValue
     , groupExtra :: [(Text, AttrValue)]
@@ -130,13 +129,6 @@ data ServiceState = ServiceState
     { ops :: LdapOps
     , sessions :: HashMap SessionToken Session
     , activeUsers :: HashMap Username ActiveUser }
-
-createServiceState :: LdapOps -> Eff es ServiceState
-createServiceState ops = do
-    pure ServiceState
-        { ops = ops
-        , sessions = HashMap.empty
-        , activeUsers = HashMap.empty }
 
 getActiveUser ::
     Error AccountError :> es
@@ -382,13 +374,16 @@ runLdapAccountService ops = reinterpret evalServiceState \_ -> \case
         trigger $ OnAccountEmailChanged session email
     where
         evalServiceState e = do
-            s <- createServiceState ops
-            evalState s e
+            let state = ServiceState
+                    { ops = ops
+                    , sessions = HashMap.empty
+                    , activeUsers = HashMap.empty }
+            evalState state e
 
 runLdapAccountServiceEx ::
     (HasCallStack, IOE :> es)
     => LdapOps
     -> Eff (AccountService : Event AccountEvent : Error AccountError : es) a
-    -> Eff es (Either AccountError a)
+    -> Eff es (Either (CallStack, AccountError) a)
 runLdapAccountServiceEx ops = 
-    runErrorNoCallStack . runEvent . runLdapAccountService ops
+    runError . runEvent . runLdapAccountService ops

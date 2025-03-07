@@ -34,8 +34,8 @@ common defaults
     DuplicateRecordFields
     NoFieldSelectors
     TypeFamilies
-    TemplateHaskell
     AllowAmbiguousTypes
+    TemplateHaskell
     Strict
   ghc-options:
     -Wall
@@ -53,6 +53,8 @@ common defaults
     effectful-core,
     effectful-th,
     effectful-plugin,
+    vector,
+    unboxing-vector,
     containers,
     unordered-containers,
     text,
@@ -60,30 +62,24 @@ common defaults
     time,
     uuid,
     data-default,
-    hashable
+    hashable,
+    cast,
+    aeson,
+    aeson-qq,
+    case-insensitive
 
-library ae-sia
+library heco-common
   import: defaults
   default-language: GHC2024
-  hs-source-dirs: ae-sia
+  hs-source-dirs: heco-common
   exposed-modules:
-    Ae.Sia,
-    Ae.Sia.Types,
-    Ae.Sia.SiaQuery,
-    Ae.Sia.SiaQuery.Entity,
-    Ae.Sia.SiaWorld,
-    Ae.Sia.SiaCompute
-
-library ae-sinta
-  import: defaults
-  default-language: GHC2024
-  hs-source-dirs: ae-sinta
-  exposed-modules:
-    Ae.Sinta,
-    Ae.Sinta.TH,
-    Ae.Sinta.Prelude,
-    Ae.Sinta.Internal.Core,
-    Ae.Sinta.Internal.Types,
+    Heco.Data.Aeson,
+    Heco.Data.Record,
+    Heco.Data.Default,
+    Heco.Network.HTTP.Client,
+    Heco.Effectful.Exception
+  build-depends:
+    http-client
   
 library heco-event
   import: defaults
@@ -108,24 +104,42 @@ library heco-account
     Heco.Effectful.AccountService.Ldap,
     Heco.Effectful.SessionContext
   build-depends:
-    ldap-client,
-    lrucaching,
-    heco-event
+    heco-event,
+    ldap-client
 
 library heco-language
   import: defaults
   default-language: GHC2024
   hs-source-dirs: heco-language
   exposed-modules:
+    Heco.Data.Model,
     Heco.Data.Message,
     Heco.Data.Role,
     Heco.Data.LanguageError,
-    Heco.Data.Embeddings,
+    Heco.Data.Embedding,
     Heco.Events.LanguageEvent,
     Heco.Effectful.LanguageService,
     Heco.Effectful.LanguageService.Ollama
   build-depends:
-    aeson,
+    heco-common,
+    heco-event,
+    heco-account,
+    http-client
+
+library heco-database
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: heco-database
+  exposed-modules:
+    Heco.Data.Entity,
+    Heco.Data.Entity.TH,
+    Heco.Data.Collection,
+    Heco.Data.DatabaseError,
+    Heco.Events.DatabaseEvent,
+    Heco.Effectful.DatabaseService,
+    Heco.Effectful.DatabaseService.Milvus
+  build-depends:
+    heco-common,
     heco-event,
     heco-account,
     http-client
@@ -137,10 +151,11 @@ executable my-project-exe
   ghc-options: -O2
   default-language: GHC2024
   build-depends:
+    heco-common,
     heco-event,
     heco-account,
     heco-language,
-    ollama-haskell,
+    heco-database,
     http-client
   if os(wasi)
       ghc-options:

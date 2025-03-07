@@ -1,4 +1,5 @@
 module Heco.Data.Role where
+    
 import Data.Aeson (ToJSON(..), FromJSON(..), Value(..))
 
 data Role
