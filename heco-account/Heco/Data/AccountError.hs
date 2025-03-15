@@ -1,9 +1,10 @@
 module Heco.Data.AccountError where
+
 import Data.Data (Typeable)
 import Control.Exception (Exception)
 
 data AccountError
-    = InvalidSessionToken
+    = InvalidSessionTokenError
     | InvalidUsernameError
     | InvalidEmailError
     | UnregisteredUserError

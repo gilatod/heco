@@ -55,6 +55,7 @@ common defaults
     effectful-th,
     effectful-plugin,
     vector,
+    vector-algorithms,
     unboxing-vector,
     containers,
     unordered-containers,
@@ -77,9 +78,11 @@ library heco-common
     Heco.Data.Record,
     Heco.Data.Default,
     Heco.Network.HTTP.Client,
-    Heco.Effectful.Exception
+    Heco.Effectful.Exception,
+    Heco.Effectful.HTTP
   build-depends:
-    http-client
+    http-client,
+    http-client-tls
   
 library heco-event
   import: defaults
@@ -119,12 +122,17 @@ library heco-language
     Heco.Data.Embedding,
     Heco.Events.LanguageEvent,
     Heco.Effectful.LanguageService,
-    Heco.Effectful.LanguageService.Ollama
+    Heco.Effectful.LanguageService.Common,
+    Heco.Effectful.LanguageService.Ollama,
+    Heco.Effectful.LanguageService.OpenAI
   build-depends:
     heco-common,
     heco-event,
     heco-account,
-    http-client
+    http-client,
+    http-client-tls,
+    http-conduit,
+    conduit
 
 library heco-database
   import: defaults
@@ -142,7 +150,8 @@ library heco-database
     heco-common,
     heco-event,
     heco-account,
-    http-client
+    http-client,
+    http-client-tls
 
 library heco-subjectivity
   import: defaults
@@ -150,6 +159,7 @@ library heco-subjectivity
   hs-source-dirs: heco-subjectivity
   exposed-modules:
     Heco.Data.TimePhase,
+    Heco.Data.InternalTimeStreamError,
     Heco.Effectful.InternalTimeStream,
     Heco.Effectful.InternalTimeStream.RingBuffer,
     Heco.Events.InternalTimeStreamEvent
@@ -163,8 +173,10 @@ library heco-ego
   default-language: GHC2024
   hs-source-dirs: heco-ego
   exposed-modules:
+    Heco.Data.EgoError,
+    Heco.Events.EgoEvent,
     Heco.Effectful.Ego,
-    Heco.Effectful.Ego.Standard
+    Heco.Effectful.Ego.Heco
   build-depends:
     heco-common,
     heco-event,
@@ -185,7 +197,10 @@ executable my-project-exe
     heco-account,
     heco-language,
     heco-database,
-    http-client
+    heco-subjectivity,
+    heco-ego,
+    http-client,
+    http-client-tls
   if os(wasi)
       ghc-options:
         -no-hs-main

@@ -17,7 +17,7 @@ import Pattern.Cast (Cast(..))
 import GHC.Records (HasField)
 
 newtype EntityId = EntityId Int
-    deriving (Show, Eq, Hashable)
+    deriving (Show, Eq, Hashable, Ord, Enum, Bounded)
 
 instance VU.Unboxable EntityId where
     type Rep EntityId = Int

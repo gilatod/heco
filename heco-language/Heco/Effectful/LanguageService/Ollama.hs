@@ -1,166 +1,157 @@
 module Heco.Effectful.LanguageService.Ollama
     ( -- * Data types
       OllamaOps(..)
+    , ollamaOps
       -- * Language API
     , runOllamaLanguageService
     , runOllamaLanguageServiceEx
     ) where
 
-import Heco.Data.Aeson ()
-import Heco.Data.Model (ModelName(ModelName))
+import Heco.Network.HTTP.Client (httpPost)
+import Heco.Data.Aeson (defaultAesonOps)
+import Heco.Data.Model (ModelName(..))
 import Heco.Data.Role (Role(..))
 import Heco.Data.Message (Message(..))
 import Heco.Data.LanguageError (LanguageError(LanguageBackendError))
 import Heco.Data.Embedding (Embedding(Embedding))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
+import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.Event (Event, trigger, runEvent)
-import Heco.Effectful.LanguageService (LanguageService(..))
-import Heco.Network.HTTP.Client (httpPost)
+import Heco.Effectful.LanguageService (LanguageService(..), ChatOps(..))
+import Heco.Effectful.LanguageService.Common (unliftEventIO, relayError)
 
 import Effectful (Eff, (:>), IOE, MonadIO (liftIO))
-import Effectful.Exception (catchIO)
-import Effectful.Dispatch.Dynamic (localSeqUnliftIO, localSeqLend, reinterpret)
+import Effectful.Dispatch.Dynamic (reinterpret)
 import Effectful.Error.Dynamic (Error, HasCallStack, throwError, runError, CallStack)
-import Effectful.Reader.Static (runReader, ask)
+import Effectful.Reader.Static (ask, Reader)
 
 import Network.HTTP.Client
-    ( responseTimeoutMicro,
-      brRead,
+    ( brRead,
       withResponse,
-      defaultManagerSettings,
-      newManager,
-      ManagerSettings(managerResponseTimeout),
-      Response(responseBody), httpLbs )
+      Response(responseBody), httpLbs, Manager )
 
 import Data.Text (Text)
 import Data.Text.Encoding qualified as T
+import Data.Vector (Vector)
+import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
 import Data.Maybe (fromJust)
 import Data.List.NonEmpty (NonEmpty)
-import Data.Default (Default(..))
+import Data.Coerce (coerce)
 
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder (toLazyByteString)
 import Data.ByteString.Lazy qualified as BSL
 
-import Data.Aeson (ToJSON(..), KeyValue(..))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.TH (deriveToJSON, deriveFromJSON)
 
-import Control.Exception (SomeException, catch)
-import GHC.Generics (Generic)
+import Control.Exception (throw)
 import Control.Monad.Extra (whenJust)
+import Pattern.Cast (cast)
 
 data OllamaOps = OllamaOps
-    { hostUrl :: Text
-    , timeout :: Int }
+    { url :: Text
+    , timeout :: Maybe Int }
 
-instance Default OllamaOps where
-    def = OllamaOps
-        { hostUrl = "http://127.0.0.1:11434"
-        , timeout = 60 }
+ollamaOps :: Text -> OllamaOps
+ollamaOps url = OllamaOps
+    { url = url
+    , timeout = Nothing }
 
-data ChatOps = ChatOps
+data OllamaChatOps = OllamaChatOps
     { model :: Text
     , messages :: NonEmpty Message
-    , tools :: Maybe Text }
+    , stream :: Bool }
 
-instance ToJSON ChatOps where
-    toJSON (ChatOps model messages tools) = Aeson.object
-        [ "model" .= model
-        , "messages" .= messages
-        , "tools" .= tools
-        , "stream" .= True ]
-
-data ChatResp = ChatResp
+data OllamaChatResp = OllamaChatResp
     { message :: Maybe Message
     , done :: Bool }
 
-deriveFromJSON Aeson.defaultOptions ''ChatResp
+deriveToJSON defaultAesonOps ''OllamaChatOps
+deriveFromJSON defaultAesonOps ''OllamaChatResp
 
-data EmbeddingOps = EmbeddingOps
+data OllamaEmbeddingOps = OllamaEmbeddingOps
     { model :: Text
-    , input :: [Text] }
-    deriving (Show, Eq, Generic)
+    , input :: Vector Text }
 
-deriveToJSON Aeson.defaultOptions ''EmbeddingOps
+data OllamaEmbeddingResp = OllamaEmbeddingResp
+    { embeddings :: Vector (VU.Vector Float) }
 
-data EmbeddingResp = EmbeddingResp
-    { embeddings :: [VU.Vector Float] }
-    deriving (Show, Eq, Generic)
+deriveToJSON defaultAesonOps ''OllamaEmbeddingOps
+deriveFromJSON defaultAesonOps ''OllamaEmbeddingResp
 
-deriveFromJSON Aeson.defaultOptions ''EmbeddingResp
+embedImpl ::
+    ( HasCallStack
+    , IOE :> es
+    , Error LanguageError :> es
+    , Reader Manager :> es )
+    => OllamaOps -> OllamaEmbeddingOps -> Eff es (Vector Embedding)
+embedImpl ops req = do
+    manager <- ask
+    embeddingsRaw <-
+        (liftIO $ relayError do
+            req' <- httpPost (ops.url <> "/api/embed") [] req
+            responseBody <$> httpLbs req' manager)
+        >>= either throwError pure
+    
+    case Aeson.eitherDecode @OllamaEmbeddingResp embeddingsRaw of
+        Left e -> throwError $ LanguageBackendError e
+        Right (OllamaEmbeddingResp { embeddings = embeddings }) ->
+            if V.length embeddings == 0
+                then throwError $ LanguageBackendError "embedding not received"
+                else pure (coerce embeddings :: Vector Embedding)
 
 runOllamaLanguageService ::
     (HasCallStack, IOE :> es, Event LanguageEvent :> es, Error LanguageError :> es)
     => OllamaOps
     -> Eff (LanguageService : es) a
     -> Eff es a
-runOllamaLanguageService ops = reinterpret evalServiceState \env -> \case
-    Chat token (ModelName model) messages -> do
+runOllamaLanguageService ops = reinterpret (evalHttpManager ops.timeout) \env -> \case
+    Chat chatOps messages -> do
         manager <- ask
-        res <- unliftEventIO env \unlift -> do
-            req <- httpPost (ops.hostUrl <> "/api/chat") []
-                $ ChatOps
-                    { model = model
+        resp <- unliftEventIO env \unlift -> do
+            req <- httpPost (ops.url <> "/api/chat") []
+                $ OllamaChatOps
+                    { model = cast chatOps.modelName
                     , messages = messages
-                    , tools = Nothing }
+                    , stream = True }
 
             let builderToText = T.decodeUtf8 . BS.toStrict . toLazyByteString
                 streamResponse builder response = do
                     bs <- brRead $ responseBody response
                     if BS.null bs
-                        then pure . Right . builderToText $ builder
-                        else case Aeson.eitherDecode @ChatResp (BSL.fromStrict bs) of
-                            Left e -> pure $ Left e
+                        then pure . builderToText $ builder
+                        else case Aeson.eitherDecode @OllamaChatResp (BSL.fromStrict bs) of
+                            Left e -> throw $ LanguageBackendError e
                             Right r -> do
-                                whenJust r.message $ unlift . trigger . OnLanguageChunkReceived token
+                                whenJust r.message $ unlift . trigger . OnDiscourseChunkReceived
                                 let builder' = builder
                                         <> T.encodeUtf8Builder (fromJust r.message).content
                                 if r.done
-                                    then pure . Right . builderToText $ builder'
+                                    then pure . builderToText $ builder'
                                     else streamResponse builder' response
 
             withResponse req manager (streamResponse mempty)
-                `catch` \(e :: SomeException) -> pure . Left $ "HTTP error occured: " ++ show e
-        
-        case res of
-            Left e -> throwError $ LanguageBackendError e
-            Right r -> do
-                let msg = Message Assistant r
-                trigger $ OnLanguageResponseReceived token msg
-                pure msg
 
-    Embed token (ModelName model) texts -> do
-        manager <- ask
-        resp <- safeLiftIO do
-            req <- httpPost (ops.hostUrl <> "/api/embed") []
-                $ EmbeddingOps
-                    { model = model
-                    , input = texts }
-            responseBody <$> httpLbs req manager
-        
-        case Aeson.eitherDecode @EmbeddingResp resp of
-            Left e -> throwError $ LanguageBackendError e
-            Right r -> case r.embeddings of
-                [] -> throwError $ LanguageBackendError "embedding not received"
-                vectors -> do
-                    let embeddings = map Embedding vectors
-                    trigger $ OnEmbeddingsReceived token texts embeddings
-                    pure embeddings
-    where
-        evalServiceState e = do
-            manager <- liftIO $ newManager defaultManagerSettings
-                { managerResponseTimeout =
-                    responseTimeoutMicro $ ops.timeout * 1000000 }
-            runReader manager e
+        let msg = Message Assistant resp
+        trigger $ OnDiscourseResponseReceived msg
+        pure msg
 
-        unliftEventIO env f = localSeqLend @'[Event LanguageEvent] env \useEvent ->
-            (localSeqUnliftIO env \unlift -> f $ unlift . useEvent)
-                `catchIO` (throwError . LanguageBackendError . show)
-
-        safeLiftIO m = liftIO m 
-            `catchIO` (throwError . LanguageBackendError . show)
+    Embed (ModelName name) text -> do
+        let vec = V.singleton text
+        embeddings <- embedImpl ops OllamaEmbeddingOps
+            { model = name
+            , input = vec }
+        trigger $ OnEmbeddingsReceived vec embeddings
+        pure $ embeddings V.! 0
+    
+    EmbedMany (ModelName name) texts -> do
+        embeddings <- embedImpl ops OllamaEmbeddingOps
+            { model = name
+            , input = texts }
+        trigger $ OnEmbeddingsReceived texts embeddings
+        pure embeddings
     
 runOllamaLanguageServiceEx ::
     (HasCallStack, IOE :> es)

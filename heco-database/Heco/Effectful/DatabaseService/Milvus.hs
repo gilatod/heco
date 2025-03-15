@@ -12,30 +12,26 @@ module Heco.Effectful.DatabaseService.Milvus
 import Heco.Network.HTTP.Client (httpPost)
 import Heco.Data.Aeson (defaultAesonOps)
 import Heco.Data.Entity (EntityId(..), IsEntityData, Entity (entityDataFields))
-import Heco.Data.DatabaseError (DatabaseError(DatabaseBackendError))
+import Heco.Data.DatabaseError (DatabaseError(..))
 import Heco.Data.Collection (CollectionName(CollectionName))
 import Heco.Events.DatabaseEvent (DatabaseEvent(..))
+import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.DatabaseService (DatabaseService(..), CollectionLoadState(..), QueryOps(..), SearchOps(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful (IOE, (:>), Eff, MonadIO (liftIO))
-import Effectful.Exception (catchIO)
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret)
 import Effectful.Error.Dynamic (Error, throwError, runError, CallStack)
-import Effectful.Reader.Static (runReader, ask, Reader)
+import Effectful.Reader.Static (ask, Reader)
 
 import Network.HTTP.Client
-    ( responseTimeoutMicro,
-      httpLbs,
-      defaultManagerSettings,
-      newManager,
+    ( httpLbs,
       Manager,
-      ManagerSettings(managerResponseTimeout),
-      Response(responseBody) )
+      Response(responseBody), HttpException )
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.ByteString (ByteString)
+import Data.Text.Encoding qualified as T
 
 import Data.Aeson qualified as Aeson
 import Data.Aeson (ToJSON, FromJSON)
@@ -46,17 +42,18 @@ import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
 
 import GHC.Records (HasField)
+import Control.Exception (SomeException, catch, Exception(displayException))
 
 data MilvusOps = MilvusOps
-    { hostUrl :: Text
-    , timeout :: Int
-    , token :: Maybe ByteString
+    { url :: Text
+    , timeout :: Maybe Int
+    , token :: Maybe Text
     , database :: Maybe Text }
 
 milvusOps :: Text -> MilvusOps
 milvusOps url = MilvusOps
-    { hostUrl = url
-    , timeout = 15
+    { url = url
+    , timeout = Nothing
     , token = Nothing
     , database = Nothing }
 
@@ -162,7 +159,7 @@ data MilvusSearchParams = MilvusSearchParams
 data MilvusSearchOps = MilvusSearchOps
     { dbName :: Maybe Text
     , collectionName :: Text
-    , _data :: [VU.Vector Float]
+    , _data :: Vector (VU.Vector Float)
     , annsField :: Text
     , searchParams :: Maybe MilvusSearchParams
     , filter :: Maybe Text
@@ -185,14 +182,10 @@ getMilvusSearchParams :: SearchOps -> Maybe MilvusSearchParams
 getMilvusSearchParams ops = get ops.radius ops.rangeFilter
     where
         get Nothing Nothing = Nothing
-        get r f = Just $ MilvusSearchParams
+        get r f = Just MilvusSearchParams
             { params = MilvusSearchExtraParams
                 { radius = r
                 , range_filter = f } }
-
-safeLiftIO :: (Error DatabaseError :> es, IOE :> es) => IO a -> Eff es a
-safeLiftIO m = liftIO m
-    `catchIO` (throwError . DatabaseBackendError . show)
 
 throwErrorCode :: (HasCallStack, Error DatabaseError :> es) => Int -> Text -> Eff es a
 throwErrorCode code msg =
@@ -221,6 +214,14 @@ guardResponse resp =
         Just err | T.length err /= 0 -> throwErrorCode resp.code err
         _ -> pure ()
 
+relayError :: IO a -> IO (Either DatabaseError a)
+relayError m = (Right <$> m)
+    `catch` (\(e :: DatabaseError) -> pure . Left $ e)
+    `catch` (\(e :: HttpException) ->
+        pure . Left . DatabaseBackendError $ "HTTP error occured: " ++ displayException e)
+    `catch` (\(e :: SomeException) ->
+        pure . Left . UnhandledDatabaseError $ displayException e)
+
 milvusPost :: forall resp req es.
     ( HasCallStack
     , ToJSON req, IsMilvusResponse resp
@@ -230,15 +231,18 @@ milvusPost :: forall resp req es.
     => MilvusOps -> Text -> req -> Eff es resp
 milvusPost ops url req = do
     manager <- ask
-    resp <- safeLiftIO do
-        req' <- httpPost (ops.hostUrl <> url) headers req
-        responseBody <$> httpLbs req' manager
-    case Aeson.eitherDecode @resp resp of
+    response <-
+        (liftIO $ relayError do
+            req' <- httpPost (ops.url <> url) headers req
+            responseBody <$> httpLbs req' manager)
+        >>= either throwError pure 
+        
+    case Aeson.eitherDecode @resp response of
         Left e -> throwError $ DatabaseBackendError e
         Right r -> guardResponse r >> pure r
     where
         headers = ("Content-Type", "application/json") :
-            maybe [] (\t -> [("Authorization", "Bearer " <> t)]) ops.token
+            maybe [] (\t -> [("Authorization", "Bearer " <> T.encodeUtf8 t)]) ops.token
 
 collectionRequest ::
     ( HasCallStack
@@ -304,11 +308,12 @@ getEntitiesImpl ops (CollectionName col) ids = do
         Just es -> pure es
 
 runMilvusDatabaseService ::
-    (HasCallStack, IOE :> es, Event DatabaseEvent :> es, Error DatabaseError :> es)
-    => MilvusOps
-    -> Eff (DatabaseService : es) a
-    -> Eff es a
-runMilvusDatabaseService ops = reinterpret evalServiceState \_ -> \case
+    ( HasCallStack
+    , IOE :> es
+    , Event DatabaseEvent :> es
+    , Error DatabaseError :> es)
+    => MilvusOps -> Eff (DatabaseService : es) a -> Eff es a
+runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \case
     LoadCollection col -> do
         collectionRequest_ ops "/v2/vectordb/collections/load" col
         trigger $ OnDatabaseCollectionLoaded col
@@ -409,12 +414,6 @@ runMilvusDatabaseService ops = reinterpret evalServiceState \_ -> \case
         pure ()
 
     where
-        evalServiceState e = do
-            manager <- liftIO $ newManager defaultManagerSettings
-                { managerResponseTimeout =
-                    responseTimeoutMicro $ ops.timeout * 1000000 }
-            runReader manager e
-
         insertionUrl = "/v2/vectordb/entities/insert" :: Text
         upsertionUrl = "/v2/vectordb/entities/upsert" :: Text
 

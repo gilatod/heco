@@ -1,26 +1,27 @@
 module Heco.Effectful.Exception where
 
 import Effectful (Eff)
-import Effectful.Exception (throwIO, Exception)
+import Effectful.Exception (throwIO, Exception(displayException))
 import Effectful.Error.Dynamic (CallStack, HasCallStack)
-import Data.Data (Typeable)
-import GHC.Exception (prettyCallStackLines)
-import Data.List (intersperse)
 
-data HecoUnhandledException =
-    forall e. Exception e => HecoUnhandledException e CallStack
+import Data.Data (Typeable)
+import Data.List (intersperse)
+import GHC.Exception (prettyCallStackLines)
+
+data UnhandledHecoException =
+    forall e. Exception e => UnhandledHecoException e CallStack
     deriving (Typeable)
 
-instance Show HecoUnhandledException where
-    show (HecoUnhandledException e callStack) = concat $
-        [ "Unhandled exception: ", show e, "\n  " ]
+instance Show UnhandledHecoException where
+    show (UnhandledHecoException e callStack) = concat
+        $ [ "Unhandled exception: ", displayException e, "\n  " ]
             ++ intersperse "\n  " (prettyCallStackLines callStack)
 
-instance Exception HecoUnhandledException
+instance Exception UnhandledHecoException
 
 eitherThrowIO :: (HasCallStack, Exception e) => Eff es (Either (CallStack, e) a) -> Eff es a
 eitherThrowIO m =
     m >>= either throw pure
     where
         throw (callStack, e) =
-            throwIO $ HecoUnhandledException e callStack
+            throwIO $ UnhandledHecoException e callStack

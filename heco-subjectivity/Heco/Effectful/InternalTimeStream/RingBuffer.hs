@@ -1,18 +1,22 @@
 module Heco.Effectful.InternalTimeStream.RingBuffer where
 
 import Heco.Data.TimePhase (TimePhase(..), emptyTimePhase)
+import Heco.Data.InternalTimeStreamError (InternalTimeStreamError(..))
 import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(..))
-import Heco.Effectful.Event (Event, trigger)
+import Heco.Effectful.Event (Event, trigger, runEvent)
 import Heco.Effectful.InternalTimeStream (InternalTimeStream(..))
 
 import Effectful (Eff, (:>), IOE, MonadIO (liftIO))
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret)
+import Effectful.Exception (catchIO, Exception(displayException))
 import Effectful.Reader.Static (runReader, ask)
-import Effectful.Concurrent.MVar (MVar, takeMVar, newMVar, modifyMVar_, Concurrent)
+import Effectful.Concurrent.MVar (MVar, readMVar, newMVar, Concurrent, modifyMVar)
+import Effectful.Error.Dynamic (throwError, Error, CallStack, runError)
 
 import Data.RingBuffer (RingBuffer)
 import Data.RingBuffer qualified as RingBuffer
 import Data.Vector (Vector)
+import Data.Vector qualified as V
 import Control.Monad.Extra (whenJust)
 
 data RingBufferOps = RingBufferOps
@@ -25,42 +29,51 @@ data ServiceState = ServiceState
 runRingBufferInternalTimeStream ::
     ( HasCallStack
     , IOE :> es, Concurrent :> es
-    , Event InternalTimeStreamEvent :> es )
+    , Event InternalTimeStreamEvent :> es
+    , Error InternalTimeStreamError :> es )
     => RingBufferOps
     -> Eff (InternalTimeStream : es) a
     -> Eff es a
 runRingBufferInternalTimeStream ops = reinterpret evalServiceState \_ -> \case
     ProgressUrimpression -> do
         state <- ask
-        modifyMVar_ state.urimpression \uri -> do
-            let retention = state.retention
-                capacity = RingBuffer.capacity retention
+        
+        let urimpression = state.urimpression
+            retention = state.retention
+            capacity = RingBuffer.capacity retention
 
-            length <- liftIO $ RingBuffer.length retention
-            lostPhase <- if length == capacity
-                then liftIO $ RingBuffer.latest retention (capacity - 1)
-                else pure Nothing
+        modifyMVar urimpression \uri@(TimePhase contents) -> do
+            if V.length contents == 0
+                then pure (uri, uri)
+                else do
+                    length <- liftIO $ RingBuffer.length retention
+                    lostPhase <- if length == capacity
+                        then liftIO $ RingBuffer.latest retention (capacity - 1)
+                        else pure Nothing
 
-            liftIO $ RingBuffer.append uri retention
-            whenJust lostPhase $ trigger . TimePhaseLostEvent
-            trigger $ TimePhaseRetentedEvent uri
+                    liftIO $ RingBuffer.append uri retention
+                    whenJust lostPhase $ trigger . TimePhaseLostEvent
+                    trigger $ TimePhaseRetentedEvent uri
 
-            pure emptyTimePhase
+                    pure (emptyTimePhase, uri)
+        `catchIO` (\e -> throwError . UnhandledInternalTimeStreamError $ displayException e)
     
-    EnrichUrimpression content -> do
+    EnrichUrimpression newContents -> do
         state <- ask
-        modifyMVar_ state.urimpression \uri -> do
-            let enriched = uri { contents = content : uri.contents }
-            trigger $ TimePhaseEnrichedEvent enriched content
-            pure enriched
+        modifyMVar state.urimpression \(TimePhase contents) -> do
+            let enriched = TimePhase $ newContents <> contents
+            trigger $ TimePhaseEnrichedEvent enriched newContents
+            pure (enriched, enriched)
     
-    Urimpression -> do
+    GetUrimpression -> do
         state <- ask
-        takeMVar state.urimpression
+        readMVar state.urimpression
     
-    Retention -> do
+    GetRetention -> do
         state <- ask
-        liftIO $ RingBuffer.toList state.retention
+        -- TODO: performance!
+        liftIO (RingBuffer.toList state.retention)
+            >>= pure . V.reverse . V.fromList
     
     GetRetentionLength -> do
         state <- ask
@@ -78,3 +91,11 @@ runRingBufferInternalTimeStream ops = reinterpret evalServiceState \_ -> \case
                     { urimpression = urimpression
                     , retention = buffer }
             runReader state e
+
+runRingBufferInternalTimeStreamEx ::
+    (HasCallStack, IOE :> es, Concurrent :> es)
+    => RingBufferOps
+    -> Eff (InternalTimeStream : Event InternalTimeStreamEvent : Error InternalTimeStreamError : es) a
+    -> Eff es (Either (CallStack, InternalTimeStreamError) a)
+runRingBufferInternalTimeStreamEx ops = 
+    runError . runEvent . runRingBufferInternalTimeStream ops

@@ -9,7 +9,7 @@ import Data.Aeson
     ( Encoding,
       Value(Array),
       ToJSON(toJSON, toEncoding),
-      Options(fieldLabelModifier),
+      Options(..),
       parseIndexedJSON,
       withArray )
 import Data.Aeson qualified as Aeson
@@ -21,7 +21,8 @@ import qualified Data.Vector.Generic as VG
 
 defaultAesonOps :: Aeson.Options
 defaultAesonOps = Aeson.defaultOptions
-    { fieldLabelModifier = \case
+    { omitNothingFields = True
+    , fieldLabelModifier = \case
         ('_':rs) -> rs
         name -> name }
 

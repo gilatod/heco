@@ -1,15 +1,15 @@
 module Heco.Data.Message where
 
 import Heco.Data.Role (Role)
+import Heco.Data.Aeson (defaultAesonOps)
 
 import Data.Text (Text)
-import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
+import Data.Aeson.TH (deriveJSON)
 
 data Message = Message
     { role :: Role
     , content :: Text }
     deriving (Eq, Show, Generic)
 
-instance FromJSON Message
-instance ToJSON Message
+deriveJSON defaultAesonOps ''Message

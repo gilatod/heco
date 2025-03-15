@@ -24,8 +24,8 @@ import Heco.Effectful.AccountService (AccountService(..), LoginOps(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful ((:>), Eff, IOE, MonadIO(liftIO))
-import Effectful.Error.Dynamic (Error, throwError, HasCallStack, runError, CallStack)
-import Effectful.Dispatch.Dynamic (reinterpret)
+import Effectful.Error.Dynamic (Error, throwError, runError, CallStack)
+import Effectful.Dispatch.Dynamic (reinterpret, HasCallStack)
 import Effectful.State.Static.Shared (State, evalState, modify, get)
 import Effectful.Exception (SomeException)
 
@@ -90,7 +90,7 @@ data LdapOps = LdapOps
 
 type LdapAttrMap = HashMap Text [Text]
 
-withLdap :: LdapOps -> (Ldap -> IO a) -> IO a
+withLdap :: HasCallStack => LdapOps -> (Ldap -> IO a) -> IO a
 withLdap ops f = 
     either throwUnhandledError id <$>
         Ldap.with ops.host ops.port \l -> do
@@ -99,7 +99,7 @@ withLdap ops f =
     where
         throwUnhandledError = throw . UnhandledAccountError . show
 
-withLdapDefaultBind :: LdapOps -> (Ldap -> IO a) -> IO a
+withLdapDefaultBind :: HasCallStack => LdapOps -> (Ldap -> IO a) -> IO a
 withLdapDefaultBind ops f = withLdap ops \l ->
     Ldap.bind l ops.domain ops.password >> f l
 
@@ -193,7 +193,7 @@ requireSessionAndState ::
 requireSessionAndState token = get >>= \s ->
     case HashMap.lookup token s.sessions of
         Just session -> pure (session, s)
-        Nothing -> throwError InvalidSessionToken
+        Nothing -> throwError InvalidSessionTokenError
  
 requireSession ::
     (Error AccountError :> es, State ServiceState :> es)
@@ -247,14 +247,14 @@ searchUser ldap state filter = do
                 , email = getAttr attrs.email ""
                 , groups = groups }
 
-bindUser :: Ldap -> Dn -> Password -> IO ()
+bindUser :: HasCallStack => Ldap -> Dn -> Password -> IO ()
 bindUser ldap dn password = Ldap.bind ldap dn password
     `catch` \case
         (ResponseErrorCode _ InvalidCredentials _ _) ->
             throw IncorrectPasswordError
         e -> throw . AccountBackendError . show $ e
 
-adapt :: (Error AccountError :> es, IOE :> es) => IO b -> Eff es b
+adapt :: (HasCallStack, Error AccountError :> es, IOE :> es) => IO b -> Eff es b
 adapt m = do
     r <- liftIO $ (Right <$> m)
         `catch` \(e :: AccountError) ->
@@ -269,7 +269,7 @@ data UserOperationContext = UserOperationContext
     , session :: Session }
 
 withUser ::
-    (IOE :> es, Error AccountError :> es, State ServiceState :> es)
+    (HasCallStack, IOE :> es, Error AccountError :> es, State ServiceState :> es)
     => LdapOps -> SessionToken
     -> (Ldap -> UserOperationContext -> IO a)
     -> Eff es a

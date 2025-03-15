@@ -1,12 +1,14 @@
 module Heco.Events.LanguageEvent where
 
-import Heco.Data.Session (SessionToken)
 import Heco.Data.Message (Message)
 import Heco.Data.Embedding (Embedding)
 
 import Data.Text (Text)
+import Data.Vector (Vector)
 
 data LanguageEvent
-    = OnLanguageChunkReceived SessionToken Message
-    | OnLanguageResponseReceived SessionToken Message
-    | OnEmbeddingsReceived SessionToken [Text] [Embedding]
+    = OnReasoningChunkReceived Message
+    | OnReasoningResponseReceived Message
+    | OnDiscourseChunkReceived Message
+    | OnDiscourseResponseReceived Message
+    | OnEmbeddingsReceived (Vector Text) (Vector Embedding)

@@ -5,6 +5,7 @@ import Heco.Data.Collection (CollectionName)
 
 import Effectful (Effect, (:>), Eff)
 import Effectful.TH (makeEffect)
+import Effectful.Dispatch.Dynamic (HasCallStack)
 
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -28,14 +29,14 @@ queryOps filter = QueryOps
     , offset = Nothing }
 
 data SearchOps = SearchOps
-    { vectors :: [VU.Vector Float]
+    { vectors :: Vector (VU.Vector Float)
     , filter :: Maybe Text
     , limit :: Maybe Int
     , offset :: Maybe Int
     , radius :: Maybe Int
     , rangeFilter :: Maybe Int }
 
-searchOps :: [VU.Vector Float] -> SearchOps
+searchOps :: Vector (VU.Vector Float) -> SearchOps
 searchOps vs = SearchOps
     { vectors = vs
     , filter = Nothing
@@ -65,18 +66,18 @@ data DatabaseService :: Effect where
 
 makeEffect ''DatabaseService
 
-addEntity_ :: (DatabaseService :> es, IsEntityData e)
+addEntity_ :: (HasCallStack, DatabaseService :> es, IsEntityData e)
     => CollectionName -> e -> Eff es ()
 addEntity_ c e = addEntity c e >> pure ()
 
-addEntities_ :: (DatabaseService :> es, IsEntityData e)
+addEntities_ :: (HasCallStack, DatabaseService :> es, IsEntityData e)
     => CollectionName -> Vector e -> Eff es ()
 addEntities_ c es = addEntities c es >> pure ()
 
-setEntity_ :: (DatabaseService :> es, IsEntityData e)
+setEntity_ :: (HasCallStack, DatabaseService :> es, IsEntityData e)
     => CollectionName -> e -> Eff es ()
 setEntity_ c e = setEntity c e >> pure ()
 
-setEntities_ :: (DatabaseService :> es, IsEntityData e)
+setEntities_ :: (HasCallStack, DatabaseService :> es, IsEntityData e)
     => CollectionName -> Vector e -> Eff es ()
 setEntities_ c es = setEntities c es >> pure ()
