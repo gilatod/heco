@@ -9,5 +9,4 @@ newtype ModelName = ModelName Text
     deriving (Show, Eq, Hashable, IsString)
 
 instance Cast ModelName Text where
-    cast :: ModelName -> Text
     cast (ModelName t) = t

@@ -9,5 +9,4 @@ newtype CollectionName = CollectionName Text
     deriving (Show, Eq, Hashable, IsString)
 
 instance Cast CollectionName Text where
-    cast :: CollectionName -> Text
     cast (CollectionName t) = t

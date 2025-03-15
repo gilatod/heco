@@ -1,5 +1,8 @@
 module Heco.Data.TimePhase where
 
+import Heco.Data.Memory (Memory)
+import Heco.Data.Noema (Noema)
+
 import Data.Text (Text)
 import Data.Vector (Vector)
 
@@ -18,13 +21,29 @@ data Action
     | WishAction Text
     | WillAction Text
     | ImaginativeAction Text
-    | MemoryAction Text
+    | MemoryAction Memory
     deriving (Eq, Show)
 
 data ImmanantContent
     = SenseDataContent SenseData
     | ActionContent Action
+    | NoemaContent Noema
     deriving (Eq, Show)
+
+isSenseDataContent :: ImmanantContent -> Bool
+isSenseDataContent = \case
+    SenseDataContent _ -> True
+    _ -> False
+
+isActionContent :: ImmanantContent -> Bool
+isActionContent = \case
+    ActionContent _ -> True
+    _ -> False
+
+isNoemaContent :: ImmanantContent -> Bool
+isNoemaContent = \case
+    NoemaContent _ -> True
+    _ -> False
 
 newtype TimePhase = TimePhase (Vector ImmanantContent)
     deriving (Eq, Show)

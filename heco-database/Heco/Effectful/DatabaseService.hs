@@ -10,6 +10,7 @@ import Effectful.Dispatch.Dynamic (HasCallStack)
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector.Unboxing qualified as VU
+import Data.Default (Default)
 
 data CollectionLoadState = CollectionLoadState
     { progress :: Int
@@ -54,6 +55,7 @@ data DatabaseService :: Effect where
     GetCollectionLoadState :: CollectionName -> DatabaseService m CollectionLoadState
     GetEntityCount :: CollectionName -> DatabaseService m Int
 
+    CreateEntity :: (IsEntityData e, Default e) => CollectionName -> DatabaseService m EntityId
     AddEntities :: IsEntityData e => CollectionName -> Vector e -> DatabaseService m (VU.Vector EntityId)
     AddEntity :: IsEntityData e => CollectionName -> e -> DatabaseService m EntityId
     SetEntities :: IsEntityData e => CollectionName -> Vector e -> DatabaseService m (VU.Vector EntityId)

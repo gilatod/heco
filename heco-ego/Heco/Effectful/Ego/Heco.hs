@@ -5,29 +5,53 @@ module Heco.Effectful.Ego.Heco where
 import Heco.Data.Default ()
 import Heco.Data.Model (ModelName)
 import Heco.Data.Embedding (Embedding(..))
-import Heco.Data.Entity (EntityId)
+import Heco.Data.Entity (EntityId(EntityId))
+import Heco.Data.Memory (Memory(..))
+import Heco.Data.Noema (Noema(..), NoemaId (NoemaId), NoemaCategory (NoemaCategory))
 import Heco.Data.TimePhase (TimePhase(..), ImmanantContent(..), SenseData(..), Action(..))
 import Heco.Data.Entity.TH (deriveEntity)
 import Heco.Data.Collection (CollectionName)
 import Heco.Data.Message (Message(..))
 import Heco.Data.Role (Role(User, System))
+import Heco.Data.LanguageError (LanguageError)
 import Heco.Data.EgoError (EgoError(..))
 import Heco.Events.EgoEvent (EgoEvent(..))
-import Heco.Effectful.Event (Event, trigger, runEvent)
-import Heco.Effectful.DatabaseService (DatabaseService(..), searchEntities, SearchOps(..), searchOps, loadCollection)
-import Heco.Effectful.LanguageService (LanguageService(..), embed, chat, ChatOps)
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, getUrimpression, getRetention, enrichUrimpression_, progressUrimpression_)
+import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(OnTimePhaseLost))
+import Heco.Effectful.Event (Event, trigger, runEvent, on)
+import Heco.Effectful.DatabaseService
+    ( SearchOps(limit),
+      DatabaseService,
+      searchOps,
+      searchEntities,
+      loadCollection,
+      addEntity,
+      deleteEntities,
+      getEntity,
+      addEntities_,
+      setEntity_,
+      setEntities_ )
+import Heco.Effectful.LanguageService
+    ( chat, embed, embedMany, ChatOps, LanguageService )
+import Heco.Effectful.InternalTimeStream
+    ( InternalTimeStream,
+      enrichUrimpressionSingular_,
+      enrichUrimpression_,
+      getRetention,
+      getUrimpression,
+      progressUrimpression_ )
 import Heco.Effectful.Ego (Ego(..))
 
 import Effectful (Eff, (:>), MonadIO (liftIO), IOE)
-import Effectful.Dispatch.Dynamic (interpret, localSeqUnlift, HasCallStack)
+import Effectful.Dispatch.Dynamic (interpret, localSeqUnlift, HasCallStack, LocalEnv)
 import Effectful.Error.Dynamic (Error, throwError, runError, CallStack, catchError)
 import Effectful.Exception (finally, catch, Exception(displayException), SomeException)
 
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
 import Data.Text.Lazy.Builder qualified as TLB
+import Data.Text.Lazy.Builder.Int qualified as TLB
 import Data.Aeson ((.=))
 import Data.Aeson.Encoding (Encoding, list, pairs, encodingToLazyByteString)
 import Data.Vector qualified as V
@@ -37,16 +61,20 @@ import Data.Default (Default)
 import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Coerce (coerce)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, fromJust)
+import Data.Time (getCurrentTime, UTCTime)
 
-import GHC.Generics (Generic)
 import Control.Monad (when)
-import Heco.Data.LanguageError (LanguageError)
+import GHC.Generics (Generic)
+import GHC.Records (HasField)
+import Pattern.Cast (Cast(cast))
+import Data.Vector (Vector)
 
 data HecoOps = HecoOps
     { characterPrompt :: Text
     , interactionMainPrompt :: Text
     , retentionPrompt :: Text
+    , associationPrompt :: Text
     , urimpressionPrompt :: Text
     , toolsPrompt :: Text 
     , chatOps :: ChatOps
@@ -54,16 +82,15 @@ data HecoOps = HecoOps
     , memorySearchLimit :: Maybe Int
     , memoryEmbeddingModel :: ModelName }
 
-data MemoryData = MemoryData
-    { _type :: Text
-    , content :: Text }
+type IsMemory mem =
+    ( HasField "content" mem Text )
 
 data MemoryEntity = MemoryEntity
     { id :: Maybe EntityId
     , vector :: Maybe (VU.Vector Float)
-    , create_time :: Maybe Int
-    , _type :: Text
-    , content :: Text }
+    , topic :: Text
+    , content :: Text
+    , time :: Maybe UTCTime }
     deriving (Show, Generic, Default)
 
 instance Eq MemoryEntity where
@@ -74,33 +101,52 @@ instance Ord MemoryEntity where
 
 deriveEntity ''MemoryEntity
 
-immanantContentToMemoryData :: ImmanantContent -> MemoryData
-immanantContentToMemoryData = \case
+splitTopic :: Text -> [Text]
+splitTopic = T.split \c -> c == '/'
+
+joinTopic :: [Text] -> Text
+joinTopic = \case
+    [t] -> t
+    ts -> T.concat . map (`T.snoc` '/') $ ts
+
+immanantContentToMemory :: ImmanantContent -> Memory
+immanantContentToMemory = \case
     SenseDataContent s -> encodeSenseData s
     ActionContent a -> encodeAction a
+    NoemaContent n -> encodeNoema n
     where
         encodeSenseData = \case
-            VisualSenseData c -> toData "visual_data" c 
-            AcousticSenseData c -> toData "acoustic_data" c
-            OlfactorySenseData c -> toData "olfactory_data" c
+            VisualSenseData c -> toData "visual" c 
+            AcousticSenseData c -> toData "acoustic" c
+            OlfactorySenseData c -> toData "olfactory" c
             TactileSenseData c -> toData "tactile_data" c
             KinaestheticSenseData c -> toData "kinaesthetic_data" c
-        encodeAction = \case
-            StatementAction c -> toData "statement_action" c
-            ReasoningAction c -> toData "reasoning_action" c
-            QueryAction c -> toData "query_action" c
-            WishAction c -> toData "wish_action" c
-            WillAction c -> toData "will_action" c
-            ImaginativeAction c -> toData "imaginative_action" c
-            MemoryAction c -> toData "memory_action" c
-        toData contentType content = MemoryData
-            { _type = contentType
-            , content = content }
 
-embedMemoryData ::
-    (HasCallStack, LanguageService :> es)
-    => HecoOps -> MemoryData -> Eff es Embedding
-embedMemoryData ops ent = do
+        encodeAction = \case
+            StatementAction c -> toData "statement" c
+            ReasoningAction c -> toData "think" c
+            QueryAction c -> toData "query" c
+            WishAction c -> toData "wish" c
+            WillAction c -> toData "will" c
+            ImaginativeAction c -> toData "imagine" c
+            MemoryAction mem -> mem
+
+        encodeNoema n = Memory
+            { topic = ["object", cast n.category]
+            , baseId = Just $ cast n.id
+            , content = n.content
+            , time = Nothing }
+
+        toData contentType content = Memory
+            { topic = [contentType]
+            , baseId = Nothing
+            , content = content
+            , time = Nothing }
+
+embedMemory ::
+    (HasCallStack, IsMemory mem, LanguageService :> es)
+    => HecoOps -> mem -> Eff es Embedding
+embedMemory ops ent = do
     embed ops.memoryEmbeddingModel ent.content
 
 createCharacterSection ::
@@ -110,8 +156,9 @@ createCharacterSection ops =
 
 encodeImmanantContent :: ImmanantContent -> Encoding
 encodeImmanantContent c = 
-    let e = immanantContentToMemoryData c
-    in pairs $ "type" .= e._type <> "content" .= e.content
+    let e = immanantContentToMemory c
+    in pairs $ "topic" .= e.topic <> "content" .= e.content
+            -- <> maybe mempty (\t -> "time" .= t) e.time
 
 encodeTimePhase :: TimePhase -> Encoding
 encodeTimePhase (TimePhase contents) = list encodeImmanantContent $ V.toList contents
@@ -119,26 +166,40 @@ encodeTimePhase (TimePhase contents) = list encodeImmanantContent $ V.toList con
 encodingToLazyText :: Encoding -> TL.Text
 encodingToLazyText = TL.decodeUtf8 . encodingToLazyByteString
 
-injectMemoryContents ::
+associateMemory ::
+    ( HasCallStack
+    , DatabaseService :> es
+    , LanguageService :> es
+    , InternalTimeStream :> es )
+    => HecoOps -> Eff es (Vector ImmanantContent)
+associateMemory ops = do
+    TimePhase contents <- getUrimpression
+    if V.length contents == 0
+        then pure mempty
+        else do
+            loadCollection ops.memoryCollection
+
+            embeddings <- traverse (embedMemory ops . immanantContentToMemory) contents
+            memEnts <- searchEntities @MemoryEntity ops.memoryCollection
+                $ (searchOps . V.map coerce $ embeddings) { limit = ops.memorySearchLimit }
+
+            let nubbedEnts = V.nubBy (\a b -> compare a.id b.id) memEnts
+            pure $ V.map toImmanantContent nubbedEnts
+    where
+        toImmanantContent ent =
+            ActionContent $ MemoryAction $ Memory
+                { topic = "memory" : splitTopic ent.topic
+                , baseId = cast <$> ent.id
+                , content = ent.content
+                , time = ent.time }
+
+injectMemory ::
     ( HasCallStack
     , DatabaseService :> es
     , LanguageService :> es
     , InternalTimeStream :> es )
     => HecoOps -> Eff es ()
-injectMemoryContents ops = do
-    TimePhase contents <- getUrimpression
-    when (V.length contents /= 0) do
-        loadCollection ops.memoryCollection
-
-        embeddings <- traverse (embedMemoryData ops . immanantContentToMemoryData) contents
-        memEnts <- searchEntities @MemoryEntity ops.memoryCollection
-            $ (searchOps . V.map coerce $ embeddings) { limit = ops.memorySearchLimit }
-
-        let nubbedEnts = V.nubBy (\a b -> compare a.id b.id) memEnts
-        enrichUrimpression_ $ V.map toImmanantContent nubbedEnts
-    where
-        toImmanantContent ent =
-            ActionContent $ MemoryAction ent.content
+injectMemory ops = associateMemory ops >>= enrichUrimpression_
 
 createRetentionSection ::
     ( HasCallStack
@@ -151,6 +212,15 @@ createRetentionSection ops = do
         else let encoding = list encodeTimePhase $ V.toList retention
                  json = encodingToLazyText encoding
             in pure $ TLB.fromText ops.retentionPrompt <> TLB.fromLazyText json
+
+createAssociationSection ::
+    HecoOps -> Vector ImmanantContent -> Eff es TLB.Builder
+createAssociationSection ops contents = do
+    if V.length contents == 0
+        then pure mempty
+        else let encoding = list encodeImmanantContent $ V.toList contents
+                 json = encodingToLazyText encoding
+            in pure $ TLB.fromText ops.associationPrompt <> TLB.fromLazyText json
 
 createUrimpressionSection ::
     ( HasCallStack
@@ -167,34 +237,68 @@ createUrimpressionSection ops = do
 createTaskMessage ::
     ( HasCallStack
     , InternalTimeStream :> es )
-    => HecoOps -> Eff es Message
-createTaskMessage ops = do
+    => HecoOps -> Vector ImmanantContent -> Eff es Message
+createTaskMessage ops associations = do
     text <- mconcat . intersperse (TLB.fromText "\n\n") <$> sequenceA
         [ pure $ TLB.fromText ops.interactionMainPrompt
+        , createAssociationSection ops associations
         , createRetentionSection ops
         , createUrimpressionSection ops ]
     pure $ Message
         { role = User
         , content = TL.toStrict $ TLB.toLazyText text }
 
-runHecoEgo :: forall es a.
+memorize ::
+    ( HasCallStack
+    , IOE :> es
+    , DatabaseService :> es
+    , LanguageService :> es )
+    => HecoOps -> Vector Memory -> Eff es ()
+memorize ops mems = do
+    time <- liftIO getCurrentTime
+    embeddings <- embedMany ops.memoryEmbeddingModel $ V.map (\m -> m.content) mems
+
+    let ents = flip V.imap embeddings \i embedding ->
+            let mem = mems V.! i
+            in MemoryEntity
+                { id = EntityId <$> mem.baseId
+                , vector = Just $ cast embedding
+                , time = Just time
+                , topic = joinTopic
+                    $ case mem.topic of
+                        "memory":g -> g
+                        otherwise -> otherwise
+                , content = mem.content }
+        (extEnts, newEnts) = V.unstablePartition (\ent -> isJust ent.id) ents
+
+    when (V.length extEnts /= 0) $ setEntities_ ops.memoryCollection extEnts
+    when (V.length newEnts /= 0) $ addEntities_ ops.memoryCollection newEnts
+
+memorizeTimePhase ::
+    ( HasCallStack
+    , IOE :> es
+    , DatabaseService :> es
+    , LanguageService :> es )
+    => HecoOps -> TimePhase -> Eff es ()
+memorizeTimePhase ops (TimePhase contents) = do
+    let mems = V.map immanantContentToMemory contents
+    if V.length mems == 0
+        then pure ()
+        else memorize ops mems
+
+wrapInteraction ::
     ( HasCallStack
     , IOE :> es
     , DatabaseService :> es
     , LanguageService :> es
     , InternalTimeStream :> es
     , Event EgoEvent :> es
-    , Error EgoError :> es
     , Error LanguageError :> es )
-    => HecoOps
-    -> Eff (Ego : es) a
-    -> Eff es a
-runHecoEgo ops = interpret \env -> \case
-    InteractEgo eff ->
-        (startInteraction
-            >> localSeqUnlift env \unlift ->
-                finally (unlift eff) $ finalizeInteraction)
-        `catch` (\(e :: SomeException) -> throwError . UnhandledEgoError $ displayException e)
+    => HecoOps -> LocalEnv localEs es -> Eff localEs a -> Eff es a
+wrapInteraction ops env eff = 
+    startInteraction
+        >> localSeqUnlift env \unlift ->
+            finally (unlift eff) $ finalizeInteraction
     where
         characterPromptMsg = Message
             { role = System
@@ -205,23 +309,107 @@ runHecoEgo ops = interpret \env -> \case
             trigger $ OnEgoInteractionStarted
 
         finalizeInteraction = do
-            injectMemoryContents ops
-
-            taskMsg <- createTaskMessage ops
+            mem <- associateMemory ops
+            taskMsg <- createTaskMessage ops mem
             trigger $ OnEgoTaskGenerated taskMsg.content
+
+            --enrichUrimpression_ mem
             progressUrimpression_
 
             let doChat = chat ops.chatOps $ characterPromptMsg :| [taskMsg]
-            reply <- doChat `catchError` (\_ (e :: LanguageError) -> do
-                liftIO $ putStrLn $ displayException e
-                liftIO $ putStrLn "Error found, retrying..."
-                doChat)
+                chatLoop = do
+                    res <- (Right <$> doChat) `catchError` (\_ (e :: LanguageError) -> pure $ Left e)
+                    case res of
+                        Left e -> do
+                            liftIO $ putStrLn $ displayException e
+                            liftIO $ putStrLn "Error found, retrying..."
+                            chatLoop
+                        Right r -> pure r
+            reply <- chatLoop
             trigger $ OnEgoTaskResponded reply.content
-            enrichUrimpression_ . V.singleton . ActionContent $ StatementAction reply.content
 
-            injectMemoryContents ops
+            enrichUrimpression_ . V.singleton
+                $ ActionContent $ StatementAction reply.content
+            --injectMemory ops
+
             progressUrimpression_
             trigger $ OnEgoInteractionCompleted
+
+runHecoEgo :: forall es a.
+    ( HasCallStack
+    , IOE :> es
+    , DatabaseService :> es
+    , LanguageService :> es
+    , InternalTimeStream :> es
+    , Event EgoEvent :> es
+    , Event InternalTimeStreamEvent :> es
+    , Error EgoError :> es
+    , Error LanguageError :> es )
+    => HecoOps -> Eff (Ego : es) a -> Eff es a
+runHecoEgo ops = interpret \env -> \case
+    InteractEgo eff -> wrapInteraction ops env eff
+        `on` \case
+            OnTimePhaseLost tp -> memorizeTimePhase ops tp
+            _ -> pure ()
+        `catch` \(e :: SomeException) ->
+            (throwError . UnhandledEgoError $ displayException e)
+
+    InjectMemory -> injectMemory ops
+
+    PresentiateNoema noema -> do
+        enrichUrimpressionSingular_ $ NoemaContent noema
+
+    CreateNoema category content -> do
+        time <- liftIO $ getCurrentTime
+        Embedding embedding <- embed ops.memoryEmbeddingModel content
+        EntityId id <- addEntity ops.memoryCollection MemoryEntity
+            { id = Nothing
+            , vector = Just embedding
+            , topic = "object/" <> cast category
+            , content = content
+            , time = Just time }
+        pure Noema
+            { id = NoemaId id
+            , category = category
+            , content = "" }
+
+    SetNoema noema -> do
+        time <- liftIO $ getCurrentTime
+        Embedding embedding <- embed ops.memoryEmbeddingModel noema.content
+        setEntity_ ops.memoryCollection MemoryEntity
+            { id = Just . EntityId $ cast noema.id
+            , vector = Just embedding
+            , topic = "object/" <> cast noema.category
+            , content = noema.content
+            , time = Just time }
+ 
+    GetNoema nid@(NoemaId id) -> do
+        ent <- getEntity @MemoryEntity ops.memoryCollection (EntityId id)
+        case splitTopic ent.topic of
+            ["object", category] ->
+                pure Noema
+                    { id = nid
+                    , category = NoemaCategory category
+                    , content = ent.content }
+            _ -> throwError $ EgoInvalidNoemaError $ "invalid noema with id " <> show id
+
+    FindNoemata (Embedding embedding) -> do
+        ents <- searchEntities @MemoryEntity ops.memoryCollection
+            $ (searchOps $ V.singleton embedding) { limit = ops.memorySearchLimit  }
+        
+        pure $ flip V.mapMaybe ents \ent ->
+            case splitTopic ent.topic of
+                ["object", category] ->
+                    let id = NoemaId . cast $ fromJust ent.id
+                    in Just Noema
+                        { id = id
+                        , category = NoemaCategory category
+                        , content = ent.content }
+                _ -> Nothing
+    
+    DeleteNoema (NoemaId id) -> do
+        let idText = TL.toStrict . TLB.toLazyText . TLB.decimal $ id
+        deleteEntities ops.memoryCollection $ "id==" <> idText
 
 runHecoEgoEx ::
     ( HasCallStack
@@ -229,6 +417,7 @@ runHecoEgoEx ::
     , DatabaseService :> es
     , LanguageService :> es
     , InternalTimeStream :> es
+    , Event InternalTimeStreamEvent :> es
     , Error LanguageError :> es )
     => HecoOps
     -> Eff (Ego : Event EgoEvent : Error EgoError : es) a

@@ -163,7 +163,7 @@ handleChatResponse chatOps triggerEvent response = do
             >>= parseFull . BSL.fromChunks
     where
         builderToText = T.decodeUtf8 . BS.toStrict . toLazyByteString
- 
+
         splitData line =
             case BS.elemIndex (c2w ':') line of
                 Nothing -> Nothing
@@ -229,7 +229,7 @@ embedImpl ops req = do
             req' <- httpPost (ops.url <> "/api/embed") [] req
             responseBody <$> httpLbs req' manager)
         >>= either throwError pure
-    
+
     case Aeson.eitherDecode @OpenAIEmbeddingResp embeddingsRaw of
         Left e -> throwError $ LanguageBackendError e
         Right r -> do
@@ -263,7 +263,7 @@ runOpenAILanguageService ops = reinterpret (evalHttpManager ops.timeout) \env ->
         (reasoning, discourse) <- unliftEventIO env \unlift -> do
             req' <- httpPost (ops.url <> "/v1/chat/completions") headers req
             withResponse req' manager $ handleChatResponse chatOps (unlift . trigger)
-        
+
         when (T.length reasoning /= 0)
             $ trigger $ OnReasoningResponseReceived $ Message Assistant reasoning
 

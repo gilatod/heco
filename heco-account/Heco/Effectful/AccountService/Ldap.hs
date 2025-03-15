@@ -194,7 +194,7 @@ requireSessionAndState token = get >>= \s ->
     case HashMap.lookup token s.sessions of
         Just session -> pure (session, s)
         Nothing -> throwError InvalidSessionTokenError
- 
+
 requireSession ::
     (Error AccountError :> es, State ServiceState :> es)
     => SessionToken -> Eff es Session

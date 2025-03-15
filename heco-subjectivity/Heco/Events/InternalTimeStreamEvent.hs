@@ -4,6 +4,6 @@ import Heco.Data.TimePhase (TimePhase, ImmanantContent)
 import Data.Vector (Vector)
 
 data InternalTimeStreamEvent
-    = TimePhaseEnrichedEvent TimePhase (Vector ImmanantContent)
-    | TimePhaseRetentedEvent TimePhase
-    | TimePhaseLostEvent TimePhase
+    = OnTimePhaseEnriched TimePhase (Vector ImmanantContent)
+    | OnTimePhaseRetented TimePhase
+    | OnTimePhaseLost TimePhase

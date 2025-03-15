@@ -47,7 +47,6 @@ common defaults
     extra,
     template-haskell,
     pointed,
-    rank1dynamic,
     effectful,
     effectful-core,
     effectful-th,
@@ -59,7 +58,6 @@ common defaults
     text,
     bytestring,
     time,
-    uuid,
     data-default,
     hashable,
     cast,
@@ -80,7 +78,7 @@ library heco-common
   build-depends:
     http-client,
     http-client-tls
-  
+
 library heco-event
   import: defaults
   default-language: GHC2024
@@ -105,7 +103,8 @@ library heco-account
     Heco.Effectful.SessionContext
   build-depends:
     heco-event,
-    ldap-client
+    ldap-client,
+    uuid
 
 library heco-language
   import: defaults
@@ -155,6 +154,8 @@ library heco-subjectivity
   default-language: GHC2024
   hs-source-dirs: heco-subjectivity
   exposed-modules:
+    Heco.Data.Memory,
+    Heco.Data.Noema,
     Heco.Data.TimePhase,
     Heco.Data.InternalTimeStreamError,
     Heco.Effectful.InternalTimeStream,
@@ -180,7 +181,8 @@ library heco-ego
     heco-account,
     heco-language,
     heco-database,
-    heco-subjectivity
+    heco-subjectivity,
+    text-time
 
 executable my-project-exe
   import: defaults

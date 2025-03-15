@@ -4,7 +4,8 @@ import Data.Data (Typeable)
 import Control.Exception (Exception)
 
 data DatabaseError
-    = DatabaseBackendError String
+    = DatabaseInputError String
+    | DatabaseBackendError String
     | UnhandledDatabaseError String
     deriving (Eq, Show, Typeable)
 

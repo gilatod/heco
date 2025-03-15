@@ -4,7 +4,6 @@ module Main (main) where
 
 import Heco.Data.Default ()
 import Heco.Data.AuthGroup (AuthGroup(..))
-import Heco.Data.Session (Session(..))
 import Heco.Data.Role (Role(..))
 import Heco.Data.Message (Message(..))
 import Heco.Data.Embedding (Embedding(Embedding))
@@ -30,23 +29,23 @@ import Heco.Effectful.AccountService.Ldap
       LdapGroupMemberIdentification(..),
       runLdapAccountServiceEx )
 import Heco.Effectful.PrivilegeService (runSimplePrivilegeService)
-import Heco.Effectful.SessionContext (runSessionContext, getSessionContext, SessionContext)
-import Heco.Effectful.LanguageService (chatOps, ChatOps(..))
-import Heco.Effectful.LanguageService.OpenAI (runOpenAILanguageServiceEx, OpenAIOps(..), OpenAIMessage (reasoning), runOpenAILanguageService)
-import Heco.Effectful.LanguageService.Ollama (runOllamaLanguageServiceEx, OllamaOps(..), runOllamaLanguageService)
+import Heco.Effectful.SessionContext (getSessionContext, SessionContext)
+import Heco.Effectful.LanguageService (chatOps)
+import Heco.Effectful.LanguageService.OpenAI (OpenAIOps(..), runOpenAILanguageService)
+import Heco.Effectful.LanguageService.Ollama (OllamaOps(..), runOllamaLanguageService)
 import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
 import Heco.Effectful.DatabaseService
     ( DatabaseService,
       addEntity,
       getEntities,
-      loadCollection, setEntity_, addEntity_ )
+      loadCollection, setEntity_ )
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps (RingBufferOps, capacity), runRingBufferInternalTimeStreamEx)
 import Heco.Effectful.Ego (Ego, interactEgo)
-import Heco.Effectful.Ego.Heco (runHecoEgoEx, HecoOps(..), MemoryEntity(..))
+import Heco.Effectful.Ego.Heco (runHecoEgoEx, HecoOps(..))
 import Heco.Effectful.InternalTimeStream (InternalTimeStream, enrichUrimpression_)
 
 import Effectful (runEff, liftIO, Eff, IOE, (:>))
-import Effectful.Fail (Fail, runFailIO)
+import Effectful.Fail (runFailIO)
 import Effectful.Concurrent (runConcurrent)
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, send)
 import Effectful.State.Static.Local (evalState, get, put)
@@ -101,6 +100,12 @@ createOpenAIOps = do
         , timeout = Nothing
         , token = Just $ T.pack token }
 
+ollamaOpenAIOps :: OpenAIOps
+ollamaOpenAIOps = OpenAIOps
+    { url = "http://127.0.0.1:11434"
+    , timeout = Nothing
+    , token = Nothing }
+
 milvusOps :: MilvusOps
 milvusOps = MilvusOps
     { url = "http://localhost:19530"
@@ -113,18 +118,18 @@ createHecoOps = do
     characterPrompt <- readFile "./prompts/character.md"
     interactionMainPrompt <- readFile "./prompts/interaction_main.md"
     retentionPrompt <- readFile "./prompts/retention.md"
+    associationPrompt <- readFile "./prompts/association.md"
     urimpressionPrompt <- readFile "./prompts/urimpression.md"
     pure HecoOps
         { characterPrompt = T.pack characterPrompt
         , interactionMainPrompt = T.pack interactionMainPrompt
         , retentionPrompt = T.pack retentionPrompt
+        , associationPrompt = T.pack associationPrompt
         , urimpressionPrompt = T.pack urimpressionPrompt
         , toolsPrompt = ""
-        , memoryCollection = CollectionName "main"
+        , memoryCollection = CollectionName "memory"
         , memorySearchLimit = Just 10
-        , chatOps = (chatOps "deepseek/deepseek-r1-distill-qwen-32b:free")
-            { temperature = Just 1
-            , topP = Just 0.95 }
+        , chatOps = chatOps "fairy:14b"
         , memoryEmbeddingModel = ModelName "mxbai-embed-large" }
 
 groups :: [AuthGroup]
@@ -228,24 +233,24 @@ testMilvus = do
     Embedding vector <- embed "mxbai-embed-large" "你好世界"
     liftIO . putStrLn . show $ VU.length vector
 
-    loadCollection "main"
+    loadCollection "memory"
 
-    eid <- addEntity "main" TestEntity
+    eid <- addEntity "memory" TestEntity
         { id = Nothing
         , vector = Just vector
         , text = "hello world" }
 
-    eid2 <- addEntity "main" TestEntity
+    eid2 <- addEntity "memory" TestEntity
         { id = Nothing
         , vector = Just vector
         , text = "hello world xxxx" }
 
-    setEntity_ "main" TestEntity
+    setEntity_ "memory" TestEntity
         { id = Just eid
         , vector = Just vector
         , text = "hello world 2" }
 
-    res <- getEntities @TestEntity "main" $ VU.fromList [eid, eid2]
+    res <- getEntities @TestEntity "memory" $ VU.fromList [eid, eid2]
     liftIO $ putStrLn $ show res
     pure()
 
@@ -258,23 +263,23 @@ testHeco ::
     , Event EgoEvent :> es )
     => Eff es ()
 testHeco = evalState True $ doChat
-        `on` \case
-            OnEgoTaskGenerated msg -> liftIO do
-                T.putStrLn msg
-            _ -> pure ()
-        `on` \case
-            OnReasoningChunkReceived msg -> liftIO do
-                T.putStr $ msg.content
-                hFlush stdout
-            OnDiscourseChunkReceived msg -> do
-                reasoning <- get
-                when reasoning do
-                    put False
-                    liftIO $ putStrLn "==============="
-                liftIO $ T.putStr $ msg.content
-                liftIO $ hFlush stdout
-            OnDiscourseResponseReceived _ -> liftIO $ putStrLn ""
-            _ -> pure ()
+    `on` \case
+        OnEgoTaskGenerated msg -> liftIO do
+            T.putStrLn msg
+        _ -> pure ()
+    `on` \case
+        OnReasoningChunkReceived msg -> liftIO do
+            T.putStr $ msg.content
+            hFlush stdout
+        OnDiscourseChunkReceived msg -> do
+            reasoning <- get
+            when reasoning do
+                put False
+                liftIO $ putStrLn "==============="
+            liftIO $ T.putStr $ msg.content
+            liftIO $ hFlush stdout
+        OnDiscourseResponseReceived _ -> liftIO $ putStrLn ""
+        _ -> pure ()
     where
         doChat = do
             liftIO $ putStr "> " >> hFlush stdout
@@ -286,7 +291,7 @@ testHeco = evalState True $ doChat
                 enrichUrimpression_ $ V.singleton
                     $ SenseDataContent $ AcousticSenseData "细微的雨声"
                 enrichUrimpression_ $ V.singleton
-                    $ SenseDataContent $ VisualSenseData $ "法厄同：" <> T.pack input
+                    $ SenseDataContent $ VisualSenseData $ "User: " <> T.pack input
             doChat
 main :: IO ()
 main = do
@@ -294,14 +299,18 @@ main = do
     openaiOps <- createOpenAIOps
     let run = runEff . runFailIO . runConcurrent
             . runSimplePrivilegeService groups
-            . eitherThrowIO . runCombinedLanguageService openaiOps ollamaOps
+            . eitherThrowIO . runCombinedLanguageService ollamaOpenAIOps ollamaOps
             . eitherThrowIO . runLdapAccountServiceEx ldapOps
             . eitherThrowIO . runMilvusDatabaseServiceEx milvusOps
-            . eitherThrowIO . runRingBufferInternalTimeStreamEx RingBufferOps { capacity = 30 }
+            . eitherThrowIO . runRingBufferInternalTimeStreamEx RingBufferOps { capacity = 20 }
             . eitherThrowIO . runHecoEgoEx hecoOps
     _ <- run do
+        -- content <- liftIO $ readFile "test.csv"
+        -- let contents = flip V.map (V.fromList $ lines content)
+        --         $ ActionContent . StatementAction . T.pack
+        -- enrichUrimpression_ contents
         -- [Embedding vector] <- embed "mxbai-embed-large" ["雨声"]
-        -- addEntity_ "main" MemoryEntity
+        -- addEntity_ "memory" MemoryEntity
         --     { id = Nothing
         --     , vector = Just vector
         --     , create_time = Nothing

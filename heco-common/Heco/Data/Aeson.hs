@@ -26,6 +26,13 @@ defaultAesonOps = Aeson.defaultOptions
         ('_':rs) -> rs
         name -> name }
 
+defaultAesonOpsNotOmitNull :: Aeson.Options
+defaultAesonOpsNotOmitNull = Aeson.defaultOptions
+    { omitNothingFields = False
+    , fieldLabelModifier = \case
+        ('_':rs) -> rs
+        name -> name }
+
 aesonOps :: [(String, String)] -> Aeson.Options
 aesonOps pairs = Aeson.defaultOptions
     { fieldLabelModifier = \case

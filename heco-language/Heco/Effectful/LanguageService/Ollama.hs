@@ -12,7 +12,7 @@ import Heco.Data.Aeson (defaultAesonOps)
 import Heco.Data.Model (ModelName(..))
 import Heco.Data.Role (Role(..))
 import Heco.Data.Message (Message(..))
-import Heco.Data.LanguageError (LanguageError(LanguageBackendError))
+import Heco.Data.LanguageError (LanguageError(LanguageBackendError, LanguageInputError))
 import Heco.Data.Embedding (Embedding(Embedding))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Effectful.HTTP (evalHttpManager)
@@ -47,7 +47,7 @@ import Data.Aeson qualified as Aeson
 import Data.Aeson.TH (deriveToJSON, deriveFromJSON)
 
 import Control.Exception (throw)
-import Control.Monad.Extra (whenJust)
+import Control.Monad.Extra (whenJust, when)
 import Pattern.Cast (cast)
 
 data OllamaOps = OllamaOps
@@ -94,7 +94,7 @@ embedImpl ops req = do
             req' <- httpPost (ops.url <> "/api/embed") [] req
             responseBody <$> httpLbs req' manager)
         >>= either throwError pure
-    
+
     case Aeson.eitherDecode @OllamaEmbeddingResp embeddingsRaw of
         Left e -> throwError $ LanguageBackendError e
         Right (OllamaEmbeddingResp { embeddings = embeddings }) ->
@@ -145,14 +145,16 @@ runOllamaLanguageService ops = reinterpret (evalHttpManager ops.timeout) \env ->
             , input = vec }
         trigger $ OnEmbeddingsReceived vec embeddings
         pure $ embeddings V.! 0
-    
+
     EmbedMany (ModelName name) texts -> do
+        when (V.length texts == 0)
+            $ throwError $ LanguageInputError "texts cannot be empty"
         embeddings <- embedImpl ops OllamaEmbeddingOps
             { model = name
             , input = texts }
         trigger $ OnEmbeddingsReceived texts embeddings
         pure embeddings
-    
+
 runOllamaLanguageServiceEx ::
     (HasCallStack, IOE :> es)
     => OllamaOps

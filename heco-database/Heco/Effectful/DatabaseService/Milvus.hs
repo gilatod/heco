@@ -43,6 +43,8 @@ import Data.Vector.Unboxing qualified as VU
 
 import GHC.Records (HasField)
 import Control.Exception (SomeException, catch, Exception(displayException))
+import Control.Monad (when)
+import Data.Default (Default(def))
 
 data MilvusOps = MilvusOps
     { url :: Text
@@ -199,6 +201,11 @@ throwInvalidResponseErrorCode :: (HasCallStack, Error DatabaseError :> es) => In
 throwInvalidResponseErrorCode code =
     throwError $ DatabaseBackendError $ "invalid response; code: " ++ show code
 
+guardEntities :: (HasCallStack, Error DatabaseError :> es) => Vector e -> Eff es ()
+guardEntities es =
+    when (V.length es == 0)
+        $ throwError $ DatabaseInputError "entities cannot be empty"
+
 type IsMilvusResponse resp =
     ( FromJSON resp
     , HasField "message" resp (Maybe Text)
@@ -236,7 +243,7 @@ milvusPost ops url req = do
             req' <- httpPost (ops.url <> url) headers req
             responseBody <$> httpLbs req' manager)
         >>= either throwError pure 
-        
+
     case Aeson.eitherDecode @resp response of
         Left e -> throwError $ DatabaseBackendError e
         Right r -> guardResponse r >> pure r
@@ -325,7 +332,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
     ReleaseCollection col -> do
         collectionRequest_ ops "/v2/vectordb/collections/release" col
         trigger $ OnDatabaseCollectionReleased col
-    
+
     FlushCollection col -> do
         collectionRequest_ ops "/v2/vectordb/collections/flush" col
         trigger $ OnDatabaseCollectionFlushed col
@@ -342,14 +349,21 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
                 { state = d.loadState
                 , progress = d.loadProgress
                 , message = maybe "" id d.message }
-    
+
     GetEntityCount col -> do
         resp <- collectionRequest @MilvusGetStatsResp ops "/v2/vectordb/collections/get_stats" col
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just d -> pure d.rowCount
     
-    AddEntities col es ->
+    CreateEntity @e col -> do
+        r <- setEntitiesImpl @e ops insertionUrl col getInsertDataIds $ V.singleton def
+        if VU.length r == 0
+            then throwInvalidResponseError
+            else pure $ r VU.! 0
+
+    AddEntities col es -> do
+        guardEntities es
         setEntitiesImpl ops insertionUrl col getInsertDataIds es
 
     AddEntity col e -> do
@@ -358,7 +372,8 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
             then throwInvalidResponseError
             else pure $ r VU.! 0
 
-    SetEntities col es ->
+    SetEntities col es -> do
+        guardEntities es
         setEntitiesImpl ops upsertionUrl col getUpsertDataIds es
 
     SetEntity col e -> do
@@ -366,16 +381,18 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
         if VU.length r == 0
             then throwInvalidResponseError
             else pure $ r VU.! 0
-    
-    GetEntities col ids ->
+
+    GetEntities col ids -> do
+        when (VU.length ids == 0)
+            $ throwError $ DatabaseInputError "entity ids cannot be empty"
         getEntitiesImpl ops col ids
-    
+
     GetEntity col id -> do
         r <- getEntitiesImpl ops col $ VU.singleton id
         if V.length r == 0
             then throwInvalidResponseError
             else pure $ r V.! 0
-    
+
     QueryEntities @e (CollectionName col) queryOps -> do
         resp <- milvusPost @(MilvusGetResp e) ops "/v2/vectordb/entities/query"
             MilvusQueryOps
@@ -388,7 +405,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just es -> pure es
-    
+
     SearchEntities @e (CollectionName col) searchOps -> do
         resp <- milvusPost @(MilvusGetResp e) ops "/v2/vectordb/entities/search"
             MilvusSearchOps
@@ -404,7 +421,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just es -> pure es
-    
+
     DeleteEntities (CollectionName col) filter -> do
         _ <- milvusPost @MilvusCollectionResp ops "/v2/vectordb/entities/delete"
             MilvusDeleteOps
