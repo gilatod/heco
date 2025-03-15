@@ -171,7 +171,7 @@ testLdap = do
     token <- login $ UsernameLoginOps "test" "Holders-instance-14-sulfur"
     user <- getUser token
     liftIO . putStrLn . show $ user
-    ctx <- getSessionContext token
+    ctx <- getSessionContext @Int token
     liftIO $ putStrLn $ show ctx
     logout token
     pure ()

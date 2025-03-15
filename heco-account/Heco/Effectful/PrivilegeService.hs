@@ -19,13 +19,13 @@ runSimplePrivilegeService ::
     -> Eff (PrivilegeService : es) a
     -> Eff es a
 runSimplePrivilegeService initialGroups = reinterpret (evalState initialGroups) \_ -> \case
-    GetAuthGroups -> get
-    SetAuthGroup group -> modify \groups ->
+    GetAuthGroups -> get @[AuthGroup]
+    SetAuthGroup group -> modify @[AuthGroup] \groups ->
         let (lhs, rhs) = span (\g -> g.name /= group.name) groups
         in case rhs of
             [] -> group:groups
             (_:rs) -> lhs ++ [group] ++ rs
-    RemoveAuthGroup groupName -> state \groups ->
+    RemoveAuthGroup groupName -> state @[AuthGroup] \groups ->
         let (lhs, rhs) = span (\g -> g.name /= groupName) groups
         in case rhs of
             [] -> (False, groups)

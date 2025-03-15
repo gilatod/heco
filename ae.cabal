@@ -39,11 +39,9 @@ common defaults
     Strict
   ghc-options:
     -Wall
-    -Wunused-packages
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-    -fplugin=Effectful.Plugin
   build-depends:
     base,
     extra,
@@ -53,7 +51,6 @@ common defaults
     effectful,
     effectful-core,
     effectful-th,
-    effectful-plugin,
     vector,
     vector-algorithms,
     unboxing-vector,

@@ -36,7 +36,7 @@ runRingBufferInternalTimeStream ::
     -> Eff es a
 runRingBufferInternalTimeStream ops = reinterpret evalServiceState \_ -> \case
     ProgressUrimpression -> do
-        state <- ask
+        state <- ask @ServiceState
         
         let urimpression = state.urimpression
             retention = state.retention
@@ -59,28 +59,28 @@ runRingBufferInternalTimeStream ops = reinterpret evalServiceState \_ -> \case
         `catchIO` (\e -> throwError . UnhandledInternalTimeStreamError $ displayException e)
     
     EnrichUrimpression newContents -> do
-        state <- ask
+        state <- ask @ServiceState
         modifyMVar state.urimpression \(TimePhase contents) -> do
             let enriched = TimePhase $ newContents <> contents
             trigger $ TimePhaseEnrichedEvent enriched newContents
             pure (enriched, enriched)
     
     GetUrimpression -> do
-        state <- ask
+        state <- ask @ServiceState
         readMVar state.urimpression
     
     GetRetention -> do
-        state <- ask
+        state <- ask @ServiceState
         -- TODO: performance!
         liftIO (RingBuffer.toList state.retention)
             >>= pure . V.reverse . V.fromList
     
     GetRetentionLength -> do
-        state <- ask
+        state <- ask @ServiceState
         liftIO $ RingBuffer.length state.retention
     
     GetRetentionCapacity -> do
-        state <- ask
+        state <- ask @ServiceState
         pure $ RingBuffer.capacity state.retention
 
     where

@@ -25,9 +25,10 @@ listen_ :: (HasCallStack, Event e :> es)
     => (e -> Eff es ()) -> Eff es ()
 listen_ f = listen f >> pure ()
 
-on :: (HasCallStack, Event e :> es)
+on :: forall e es a.
+    (HasCallStack, Event e :> es)
     => Eff es a -> (e -> Eff es ()) -> Eff es a
-on e f = bracket (listen f) unlisten (const e)
+on e f = bracket (listen f) (unlisten @e) (const e)
 
 data EventState e es = EventState
     (HashMap EventListenerHandle (e -> Eff (State (EventState e es) : es) ())) Int
@@ -41,7 +42,7 @@ runEvent = reinterpret (evalState emptyState) \env -> \case
                 map' = HashMap.insert handle (unlift . listener) map
             in (handle, EventState map' (acc + 1))
     Unlisten handle ->
-        modify \(EventState map acc) ->
+        modify @(EventState e es) \(EventState map acc) ->
             let map' = HashMap.delete handle map
             in EventState map' acc
     Trigger e ->

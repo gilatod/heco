@@ -320,7 +320,7 @@ runLdapAccountService ops = reinterpret evalServiceState \_ -> \case
         trigger $ OnAccountLogout session
 
     GetSessions ->
-        get >>= \s -> pure . HashMap.elems $ s.sessions
+        get @ServiceState >>= \s -> pure . HashMap.elems $ s.sessions
     GetSession token ->
         requireSession token
     GetUser token -> do
