@@ -54,6 +54,7 @@ import Data.HashSet qualified as HashSet
 import Data.HashMap.Strict (HashMap, fromList)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Maybe (mapMaybe)
+import Data.Function ((&))
 import Control.Exception (catch, throw)
 
 data LdapUserAttributes = LdapUserAttributes
@@ -208,7 +209,7 @@ searchUserGroups ldap state filter = do
         ops.groupObjectClass
         ops.groupExtra
         filter
-    pure $ flip mapMaybe groups \(SearchEntry _ entries) ->
+    pure $ groups & mapMaybe \(SearchEntry _ entries) ->
         case lookup (Attr ops.groupAttrs.name) entries of
             Nothing -> Nothing
             Just [] -> Nothing

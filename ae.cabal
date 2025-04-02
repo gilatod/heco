@@ -114,6 +114,8 @@ library heco-language
     Heco.Data.Model,
     Heco.Data.Message,
     Heco.Data.Role,
+    Heco.Data.FunctionSchema,
+    Heco.Data.FunctionSchema.JSON,
     Heco.Data.LanguageError,
     Heco.Data.Embedding,
     Heco.Events.LanguageEvent,

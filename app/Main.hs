@@ -2,6 +2,12 @@
 
 module Main (main) where
 
+import Heco.Data.FunctionSchema
+    ( FunctionSchema(..),
+      propArray,
+      ParametricSpec(spec),
+      ArraySpec(..),
+      ArrayItemSpec(..), describe, DataSchema(ObjectSchema), propString, optional )
 import Heco.Data.Default ()
 import Heco.Data.AuthGroup (AuthGroup(..))
 import Heco.Data.Role (Role(..))
@@ -17,7 +23,7 @@ import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Events.EgoEvent (EgoEvent(..))
 import Heco.Effectful.Exception (eitherThrowIO)
 import Heco.Effectful.Event (on, Event, runEvent)
-import Heco.Effectful.LanguageService (embed, chat, LanguageService(..))
+import Heco.Effectful.LanguageService (embed, chat, LanguageService(..), ChatOps(..))
 import Heco.Effectful.AccountService (LoginOps(..), login, getUser, logout, AccountService)
 import Heco.Effectful.AccountService.Ldap
     ( LdapOps(..),
@@ -60,11 +66,12 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
+import Data.Function ((&))
 
+import Control.Monad (when)
+import System.IO (stdout)
 import GHC.IO.Handle (hFlush)
 import GHC.Generics (Generic)
-import System.IO (stdout)
-import Control.Monad (when)
 
 ldapOps :: LdapOps
 ldapOps = LdapOps
@@ -96,19 +103,19 @@ createOpenAIOps :: IO OpenAIOps
 createOpenAIOps = do
     token <- readFile "./tokens/openrouter.txt"
     pure OpenAIOps
-        { url = "https://openrouter.ai/api"
+        { url = "https://openrouter.ai/api/v1"
         , timeout = Nothing
         , token = Just $ T.pack token }
 
 ollamaOpenAIOps :: OpenAIOps
 ollamaOpenAIOps = OpenAIOps
-    { url = "http://127.0.0.1:11434"
+    { url = "http://127.0.0.1:11434/v1"
     , timeout = Nothing
     , token = Nothing }
 
 milvusOps :: MilvusOps
 milvusOps = MilvusOps
-    { url = "http://localhost:19530"
+    { url = "http://localhost:19530/v2"
     , timeout = Nothing
     , token = Nothing
     , database = Just "heco" }
@@ -129,7 +136,7 @@ createHecoOps = do
         , toolsPrompt = ""
         , memoryCollection = CollectionName "memory"
         , memorySearchLimit = Just 10
-        , chatOps = chatOps "fairy:14b"
+        , chatOps = chatOps "deepseek/deepseek-r1"
         , memoryEmbeddingModel = ModelName "mxbai-embed-large" }
 
 groups :: [AuthGroup]
@@ -213,7 +220,20 @@ testChat = do
             let messages' = appendList messages [Message User $ T.pack input]
             msg <- chat r1ChatOps messages'
             doChat token $ appendList messages' [msg]
-        r1ChatOps = chatOps "deepseek/deepseek-r1-distill-llama-70b:free"
+
+        r1ChatOps = (chatOps "google/gemini-2.5-pro-exp-03-25:free")
+            { tools = [schema]
+            , stream = False
+            , providers = Nothing }
+
+        schema = FunctionSchema "get_weather" (Just "Get weather from given locations and datetimes") $ spec
+            [ propArray "location" $ def
+                { items = ArrayItems $ ObjectSchema $ spec
+                    [ propString "name" def
+                        & describe "Name of location, e.g. San Francisco, CA"
+                    , propString "datetime" def
+                        & optional
+                        & describe "Date or time, e.g. today, tomorrow, 2023-06-29" ] } ]
 
 data TestEntity = TestEntity
     { id :: Maybe EntityId
@@ -286,20 +306,21 @@ testHeco = evalState True $ doChat
             input <- liftIO $ getLine
             put True
             interactEgo do
-                enrichUrimpression_ $ V.singleton
-                    $ SenseDataContent $ OlfactorySenseData "泥土的气味"
-                enrichUrimpression_ $ V.singleton
-                    $ SenseDataContent $ AcousticSenseData "细微的雨声"
-                enrichUrimpression_ $ V.singleton
-                    $ SenseDataContent $ VisualSenseData $ "User: " <> T.pack input
+                enrichUrimpression_ $ V.singleton $
+                    SenseDataContent $ OlfactorySenseData "泥土的气味"
+                enrichUrimpression_ $ V.singleton $
+                    SenseDataContent $ AcousticSenseData "细微的雨声"
+                enrichUrimpression_ $ V.singleton $
+                    SenseDataContent $ VisualSenseData $ "User: " <> T.pack input
             doChat
+
 main :: IO ()
 main = do
     hecoOps <- createHecoOps
     openaiOps <- createOpenAIOps
     let run = runEff . runFailIO . runConcurrent
             . runSimplePrivilegeService groups
-            . eitherThrowIO . runCombinedLanguageService ollamaOpenAIOps ollamaOps
+            . eitherThrowIO . runCombinedLanguageService openaiOps ollamaOps
             . eitherThrowIO . runLdapAccountServiceEx ldapOps
             . eitherThrowIO . runMilvusDatabaseServiceEx milvusOps
             . eitherThrowIO . runRingBufferInternalTimeStreamEx RingBufferOps { capacity = 20 }
@@ -316,5 +337,5 @@ main = do
         --     , create_time = Nothing
         --     , _type = "accustic_data"
         --     , content = "Fairy 讨厌雨声" }
-        testHeco
+        testChat
     pure ()

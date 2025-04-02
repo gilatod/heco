@@ -13,8 +13,8 @@ data UnhandledHecoException =
     deriving (Typeable)
 
 instance Show UnhandledHecoException where
-    show (UnhandledHecoException e callStack) = concat
-        $ [ "Unhandled exception: ", displayException e, "\n  " ]
+    show (UnhandledHecoException e callStack) = concat $
+        [ "Unhandled exception: ", displayException e, "\n  " ]
             ++ intersperse "\n  " (prettyCallStackLines callStack)
 
 instance Exception UnhandledHecoException

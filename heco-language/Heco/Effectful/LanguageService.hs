@@ -3,6 +3,7 @@ module Heco.Effectful.LanguageService where
 import Heco.Data.Model (ModelName)
 import Heco.Data.Message (Message)
 import Heco.Data.Embedding (Embedding)
+import Heco.Data.FunctionSchema (FunctionSchema)
 
 import Effectful (Effect, Eff, (:>))
 import Effectful.TH (makeEffect)
@@ -14,7 +15,9 @@ import Data.Vector (Vector)
 
 data ChatOps = ChatOps
     { modelName :: ModelName
+    , providers :: Maybe [Text]
     , stream :: Bool
+    , tools :: [FunctionSchema]
     , temperature :: Maybe Float
     , topP :: Maybe Float
     , maxToken :: Maybe Int
@@ -24,7 +27,9 @@ data ChatOps = ChatOps
 chatOps :: ModelName -> ChatOps
 chatOps name = ChatOps
     { modelName = name
+    , providers = Nothing
     , stream = True
+    , tools = []
     , temperature = Nothing
     , topP = Nothing
     , maxToken = Nothing
@@ -34,7 +39,9 @@ chatOps name = ChatOps
 chatOpsNoStream :: ModelName -> ChatOps
 chatOpsNoStream name = ChatOps
     { modelName = name
+    , providers = Nothing
     , stream = False
+    , tools = []
     , temperature = Nothing
     , topP = Nothing
     , maxToken = Nothing

@@ -112,7 +112,7 @@ runOllamaLanguageService ops = reinterpret (evalHttpManager ops.timeout) \env ->
         manager <- ask
         resp <- unliftEventIO env \unlift -> do
             req <- httpPost (ops.url <> "/api/chat") []
-                $ OllamaChatOps
+                OllamaChatOps
                     { model = cast chatOps.modelName
                     , messages = messages
                     , stream = True }
@@ -147,8 +147,8 @@ runOllamaLanguageService ops = reinterpret (evalHttpManager ops.timeout) \env ->
         pure $ embeddings V.! 0
 
     EmbedMany (ModelName name) texts -> do
-        when (V.length texts == 0)
-            $ throwError $ LanguageInputError "texts cannot be empty"
+        when (V.length texts == 0) $
+            throwError $ LanguageInputError "texts cannot be empty"
         embeddings <- embedImpl ops OllamaEmbeddingOps
             { model = name
             , input = texts }

@@ -1,0 +1,49 @@
+{
+    "model": "deepseek/deepseek-r1-distill-llama-70b:free",
+    "messages": [
+        {
+            "role": "system",
+            "content": ""
+        },
+        {
+            "role": "user",
+            "content": "你好"
+        }
+    ],
+    "tools": [
+        {
+            "name": "get_weather",
+            "type": "object",
+            "description": "Get weather from given locations and datetimes",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "description": "Name of location, e.g. San Francisco, CA",
+                                    "type": "string"
+                                },
+                                "datetime": {
+                                    "description": "Date or time, e.g. today, tomorrow, 2023-06-29",
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "name",
+                                "datetime"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "location"
+                ]
+            }
+        }
+    ],
+    "stream": true
+}

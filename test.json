@@ -1,0 +1,36 @@
+{
+    "id": "gen-1743604269-3i86VGDI3RHDWhp7SlXN",
+    "provider": "Google AI Studio",
+    "model": "google/gemini-2.5-pro-exp-03-25",
+    "object": "chat.completion",
+    "created": 1743604269,
+    "choices": [
+        {
+            "logprobs": null,
+            "finish_reason": "tool_calls",
+            "native_finish_reason": "STOP",
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "refusal": null,
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "tool_0_get_weather",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": "{\"location\":[{\"datetime\":\"today\",\"name\":\"Huzhou\"}]}"
+                        }
+                    }
+                ]
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 142,
+        "completion_tokens": 27,
+        "total_tokens": 169
+    }
+}

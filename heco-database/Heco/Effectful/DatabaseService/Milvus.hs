@@ -32,19 +32,17 @@ import Network.HTTP.Client
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
-
 import Data.Aeson qualified as Aeson
 import Data.Aeson (ToJSON, FromJSON)
 import Data.Aeson.TH (deriveToJSON1, deriveFromJSON, deriveToJSON)
-
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
+import Data.Default (Default(def))
 
 import GHC.Records (HasField)
 import Control.Exception (SomeException, catch, Exception(displayException))
 import Control.Monad (when)
-import Data.Default (Default(def))
 
 data MilvusOps = MilvusOps
     { url :: Text
@@ -203,8 +201,8 @@ throwInvalidResponseErrorCode code =
 
 guardEntities :: (HasCallStack, Error DatabaseError :> es) => Vector e -> Eff es ()
 guardEntities es =
-    when (V.length es == 0)
-        $ throwError $ DatabaseInputError "entities cannot be empty"
+    when (V.length es == 0) $
+        throwError $ DatabaseInputError "entities cannot be empty"
 
 type IsMilvusResponse resp =
     ( FromJSON resp
@@ -285,8 +283,8 @@ setEntitiesImpl ::
     => MilvusOps -> Text -> CollectionName -> (resp -> Maybe (VU.Vector EntityId)) -> Vector e
     -> Eff es (VU.Vector EntityId)
 setEntitiesImpl ops url (CollectionName col) idsGetter es = do
-    resp <- milvusPost ops url
-        $ Aeson.toJSON1 MilvusInsertOps
+    resp <- milvusPost ops url $
+        Aeson.toJSON1 MilvusInsertOps
             { dbName = ops.database
             , collectionName = col
             , _data = es }
@@ -304,7 +302,7 @@ getEntitiesImpl :: forall e es.
     , Error DatabaseError :> es )
     => MilvusOps -> CollectionName -> VU.Vector EntityId -> Eff es (Vector e)
 getEntitiesImpl ops (CollectionName col) ids = do
-    resp <- milvusPost @(MilvusGetResp e) ops "/v2/vectordb/entities/get"
+    resp <- milvusPost @(MilvusGetResp e) ops "/vectordb/entities/get"
         MilvusGetOps
             { dbName = ops.database
             , collectionName = col
@@ -322,27 +320,27 @@ runMilvusDatabaseService ::
     => MilvusOps -> Eff (DatabaseService : es) a -> Eff es a
 runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \case
     LoadCollection col -> do
-        collectionRequest_ ops "/v2/vectordb/collections/load" col
+        collectionRequest_ ops "/vectordb/collections/load" col
         trigger $ OnDatabaseCollectionLoaded col
 
     RefreshLoadCollection col -> do
-        collectionRequest_ ops "/v2/vectordb/collections/refresh_load" col
+        collectionRequest_ ops "/vectordb/collections/refresh_load" col
         trigger $ OnDatabaseCollectionLoaded col
 
     ReleaseCollection col -> do
-        collectionRequest_ ops "/v2/vectordb/collections/release" col
+        collectionRequest_ ops "/vectordb/collections/release" col
         trigger $ OnDatabaseCollectionReleased col
 
     FlushCollection col -> do
-        collectionRequest_ ops "/v2/vectordb/collections/flush" col
+        collectionRequest_ ops "/vectordb/collections/flush" col
         trigger $ OnDatabaseCollectionFlushed col
 
     CompactCollection col -> do
-        collectionRequest_ ops "/v2/vectordb/collections/compact" col
+        collectionRequest_ ops "/vectordb/collections/compact" col
         trigger $ OnDatabaseCollectionCompacted col
 
     GetCollectionLoadState col -> do
-        resp <- collectionRequest @MilvusStatusResp ops "/v2/vectordb/collections/get_load_state" col
+        resp <- collectionRequest @MilvusStatusResp ops "/vectordb/collections/get_load_state" col
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just d -> pure CollectionLoadState
@@ -351,7 +349,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
                 , message = maybe "" id d.message }
 
     GetEntityCount col -> do
-        resp <- collectionRequest @MilvusGetStatsResp ops "/v2/vectordb/collections/get_stats" col
+        resp <- collectionRequest @MilvusGetStatsResp ops "/vectordb/collections/get_stats" col
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just d -> pure d.rowCount
@@ -383,8 +381,8 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
             else pure $ r VU.! 0
 
     GetEntities col ids -> do
-        when (VU.length ids == 0)
-            $ throwError $ DatabaseInputError "entity ids cannot be empty"
+        when (VU.length ids == 0) $
+            throwError $ DatabaseInputError "entity ids cannot be empty"
         getEntitiesImpl ops col ids
 
     GetEntity col id -> do
@@ -394,7 +392,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
             else pure $ r V.! 0
 
     QueryEntities @e (CollectionName col) queryOps -> do
-        resp <- milvusPost @(MilvusGetResp e) ops "/v2/vectordb/entities/query"
+        resp <- milvusPost @(MilvusGetResp e) ops "/vectordb/entities/query"
             MilvusQueryOps
                 { dbName = ops.database
                 , collectionName = col
@@ -407,7 +405,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
             Just es -> pure es
 
     SearchEntities @e (CollectionName col) searchOps -> do
-        resp <- milvusPost @(MilvusGetResp e) ops "/v2/vectordb/entities/search"
+        resp <- milvusPost @(MilvusGetResp e) ops "/vectordb/entities/search"
             MilvusSearchOps
                 { dbName = ops.database
                 , collectionName = col
@@ -423,7 +421,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
             Just es -> pure es
 
     DeleteEntities (CollectionName col) filter -> do
-        _ <- milvusPost @MilvusCollectionResp ops "/v2/vectordb/entities/delete"
+        _ <- milvusPost @MilvusCollectionResp ops "/vectordb/entities/delete"
             MilvusDeleteOps
                 { dbName = ops.database
                 , collectionName = col
@@ -431,8 +429,8 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
         pure ()
 
     where
-        insertionUrl = "/v2/vectordb/entities/insert" :: Text
-        upsertionUrl = "/v2/vectordb/entities/upsert" :: Text
+        insertionUrl = "/vectordb/entities/insert" :: Text
+        upsertionUrl = "/vectordb/entities/upsert" :: Text
 
 runMilvusDatabaseServiceEx ::
     (HasCallStack, IOE :> es)

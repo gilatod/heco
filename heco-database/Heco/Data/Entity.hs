@@ -38,6 +38,5 @@ class (Default e, Generic e, GToJSON' Value Zero (Rep e), FromJSON e, IsEntityDa
     entityDataFields :: [Text]
     entityDataFields = case genericToJSON defaultAesonOpsNotOmitNull (def :: e) of
         Object obj ->
-            filter (\t -> t /= "id" && t /= "vector")
-                $ map K.toText (KM.keys obj)
+            filter (\t -> t /= "id" && t /= "vector") $ map K.toText (KM.keys obj)
         _ -> []

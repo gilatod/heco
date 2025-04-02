@@ -3,6 +3,7 @@
 module Heco.Effectful.Ego.Heco where
 
 import Heco.Data.Default ()
+import Heco.Data.Aeson (encodingToLazyText)
 import Heco.Data.Model (ModelName)
 import Heco.Data.Embedding (Embedding(..))
 import Heco.Data.Entity (EntityId(EntityId))
@@ -49,11 +50,11 @@ import Effectful.Exception (finally, catch, Exception(displayException), SomeExc
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
-import Data.Text.Lazy.Encoding qualified as TL
 import Data.Text.Lazy.Builder qualified as TLB
 import Data.Text.Lazy.Builder.Int qualified as TLB
 import Data.Aeson ((.=))
-import Data.Aeson.Encoding (Encoding, list, pairs, encodingToLazyByteString)
+import Data.Aeson.Encoding (Encoding, list, pairs)
+import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Algorithms qualified as V
 import Data.Vector.Unboxing qualified as VU
@@ -63,12 +64,12 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Data.Coerce (coerce)
 import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Time (getCurrentTime, UTCTime)
+import Data.Function ((&))
 
 import Control.Monad (when)
 import GHC.Generics (Generic)
 import GHC.Records (HasField)
 import Pattern.Cast (Cast(cast))
-import Data.Vector (Vector)
 
 data HecoOps = HecoOps
     { characterPrompt :: Text
@@ -123,7 +124,7 @@ immanantContentToMemory = \case
             KinaestheticSenseData c -> toData "kinaesthetic_data" c
 
         encodeAction = \case
-            StatementAction c -> toData "statement" c
+            StatementAction c -> toData "assistant" c
             ReasoningAction c -> toData "think" c
             QueryAction c -> toData "query" c
             WishAction c -> toData "wish" c
@@ -163,9 +164,6 @@ encodeImmanantContent c =
 encodeTimePhase :: TimePhase -> Encoding
 encodeTimePhase (TimePhase contents) = list encodeImmanantContent $ V.toList contents
 
-encodingToLazyText :: Encoding -> TL.Text
-encodingToLazyText = TL.decodeUtf8 . encodingToLazyByteString
-
 associateMemory ::
     ( HasCallStack
     , DatabaseService :> es
@@ -180,8 +178,8 @@ associateMemory ops = do
             loadCollection ops.memoryCollection
 
             embeddings <- traverse (embedMemory ops . immanantContentToMemory) contents
-            memEnts <- searchEntities @MemoryEntity ops.memoryCollection
-                $ (searchOps . V.map coerce $ embeddings) { limit = ops.memorySearchLimit }
+            memEnts <- searchEntities @MemoryEntity ops.memoryCollection $
+                (searchOps . V.map coerce $ embeddings) { limit = ops.memorySearchLimit }
 
             let nubbedEnts = V.nubBy (\a b -> compare a.id b.id) memEnts
             pure $ V.map toImmanantContent nubbedEnts
@@ -258,14 +256,14 @@ memorize ops mems = do
     time <- liftIO getCurrentTime
     embeddings <- embedMany ops.memoryEmbeddingModel $ V.map (\m -> m.content) mems
 
-    let ents = flip V.imap embeddings \i embedding ->
+    let ents = embeddings & V.imap \i embedding ->
             let mem = mems V.! i
             in MemoryEntity
                 { id = EntityId <$> mem.baseId
                 , vector = Just $ cast embedding
                 , time = Just time
                 , topic = joinTopic
-                    $ case mem.topic of
+                    case mem.topic of
                         "memory":g -> g
                         otherwise -> otherwise
                 , content = mem.content }
@@ -328,8 +326,8 @@ wrapInteraction ops env eff =
             reply <- chatLoop
             trigger $ OnEgoTaskResponded reply.content
 
-            enrichUrimpression_ . V.singleton
-                $ ActionContent $ StatementAction reply.content
+            enrichUrimpression_ . V.singleton $
+                ActionContent $ StatementAction reply.content
             --injectMemory ops
 
             progressUrimpression_
@@ -394,10 +392,10 @@ runHecoEgo ops = interpret \env -> \case
             _ -> throwError $ EgoInvalidNoemaError $ "invalid noema with id " <> show id
 
     FindNoemata (Embedding embedding) -> do
-        ents <- searchEntities @MemoryEntity ops.memoryCollection
-            $ (searchOps $ V.singleton embedding) { limit = ops.memorySearchLimit  }
+        ents <- searchEntities @MemoryEntity ops.memoryCollection $
+            (searchOps $ V.singleton embedding) { limit = ops.memorySearchLimit  }
         
-        pure $ flip V.mapMaybe ents \ent ->
+        pure $ ents & V.mapMaybe \ent ->
             case splitTopic ent.topic of
                 ["object", category] ->
                     let id = NoemaId . cast $ fromJust ent.id
