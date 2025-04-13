@@ -10,7 +10,8 @@ import Effectful.Dispatch.Dynamic (HasCallStack)
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector.Unboxing qualified as VU
-import Data.Default (Default)
+import Data.Default (Default(..))
+import GHC.Generics (Generic)
 
 data CollectionLoadState = CollectionLoadState
     { progress :: Int
@@ -22,6 +23,7 @@ data QueryOps = QueryOps
     { filter :: Text
     , limit :: Maybe Int
     , offset :: Maybe Int }
+    deriving (Show, Eq)
 
 queryOps :: Text -> QueryOps
 queryOps filter = QueryOps
@@ -30,21 +32,14 @@ queryOps filter = QueryOps
     , offset = Nothing }
 
 data SearchOps = SearchOps
-    { vectors :: Vector (VU.Vector Float)
-    , filter :: Maybe Text
+    { filter :: Maybe Text
     , limit :: Maybe Int
     , offset :: Maybe Int
-    , radius :: Maybe Int
-    , rangeFilter :: Maybe Int }
+    , radius :: Maybe Float
+    , rangeFilter :: Maybe Float }
+    deriving (Generic, Show, Eq)
 
-searchOps :: Vector (VU.Vector Float) -> SearchOps
-searchOps vs = SearchOps
-    { vectors = vs
-    , filter = Nothing
-    , limit = Nothing
-    , offset = Nothing
-    , radius = Nothing
-    , rangeFilter = Nothing }
+instance Default SearchOps
 
 data DatabaseService :: Effect where
     LoadCollection :: CollectionName -> DatabaseService m ()
@@ -63,7 +58,7 @@ data DatabaseService :: Effect where
     GetEntities :: Entity e => CollectionName -> VU.Vector EntityId -> DatabaseService m (Vector e)
     GetEntity :: Entity e => CollectionName -> EntityId -> DatabaseService m e
     QueryEntities :: Entity e => CollectionName -> QueryOps -> DatabaseService m (Vector e)
-    SearchEntities :: Entity e => CollectionName -> SearchOps -> DatabaseService m (Vector e)
+    SearchEntities :: Entity e => CollectionName -> SearchOps -> Vector (VU.Vector Float) -> DatabaseService m (Vector e)
     DeleteEntities :: CollectionName -> Text -> DatabaseService m ()
 
 makeEffect ''DatabaseService

@@ -1,52 +1,43 @@
 module Heco.Data.TimePhase where
 
-import Heco.Data.Memory (Memory)
-import Heco.Data.Noema (Noema)
+import Effectful (IOE, (:>), Eff, MonadIO (liftIO))
 
+import Data.Typeable (Typeable)
+import Data.List (intersperse)
 import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Builder qualified as TLB
 import Data.Vector (Vector)
+import Data.Vector qualified as V
+import Data.Unique (Unique, newUnique)
+import Pattern.Cast (Cast(..))
 
-data SenseData
-    = VisualSenseData Text
-    | AcousticSenseData Text
-    | OlfactorySenseData Text
-    | TactileSenseData Text
-    | KinaestheticSenseData Text
-    deriving (Eq, Show)
+class Typeable c => ImmanantContent c where
+    encodeImmanantContent :: c -> [Text]
+    getImmanantContentAttributes :: c -> [(Text, Text)]
+    getImmanantContentAttributes _ = []
 
-data Action
-    = StatementAction Text
-    | ReasoningAction Text
-    | QueryAction Text
-    | WishAction Text
-    | WillAction Text
-    | ImaginativeAction Text
-    | MemoryAction Memory
-    deriving (Eq, Show)
+joinImmanantContent :: ImmanantContent c => Text -> c -> Text
+joinImmanantContent separator =
+    T.concat . intersperse separator . encodeImmanantContent
 
-data ImmanantContent
-    = SenseDataContent SenseData
-    | ActionContent Action
-    | NoemaContent Noema
-    deriving (Eq, Show)
+data AnyImmanantContent = forall c. ImmanantContent c => AnyImmanantContent c
 
-isSenseDataContent :: ImmanantContent -> Bool
-isSenseDataContent = \case
-    SenseDataContent _ -> True
-    _ -> False
+instance ImmanantContent c => Cast c AnyImmanantContent where
+    cast c = AnyImmanantContent c
 
-isActionContent :: ImmanantContent -> Bool
-isActionContent = \case
-    ActionContent _ -> True
-    _ -> False
+data TimePhase = TimePhase Unique (Vector AnyImmanantContent)
 
-isNoemaContent :: ImmanantContent -> Bool
-isNoemaContent = \case
-    NoemaContent _ -> True
-    _ -> False
+instance Show TimePhase where
+    show (TimePhase _ contents) =
+        TL.unpack $ TLB.toLazyText $ "TimePhase <" <> V.foldl accumulate mempty contents <> ">"
+        where
+            accumulate prev c = prev <> ", " <> format c
+            format (AnyImmanantContent c) =
+                TLB.fromString $ show $ encodeImmanantContent c
 
-newtype TimePhase = TimePhase (Vector ImmanantContent)
-    deriving (Eq, Show)
-
-emptyTimePhase :: TimePhase
-emptyTimePhase = TimePhase mempty
+newTimePhase :: IOE :> es => Vector AnyImmanantContent -> Eff es TimePhase
+newTimePhase cs = do
+    u <- liftIO $ newUnique
+    pure $ TimePhase u cs

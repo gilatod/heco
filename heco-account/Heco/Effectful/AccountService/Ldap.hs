@@ -18,7 +18,7 @@ module Heco.Effectful.AccountService.Ldap
 import Heco.Data.AccountError (AccountError(..))
 import Heco.Data.User (User(..), Username(Username))
 import Heco.Data.AuthGroup (GroupName(GroupName))
-import Heco.Data.Session (Session(..), SessionToken(SessionToken))
+import Heco.Data.Session (SessionToken, Session(..), newSessionToken)
 import Heco.Events.AccountEvent (AccountEvent(..))
 import Heco.Effectful.AccountService (AccountService(..), LoginOps(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
@@ -47,7 +47,6 @@ import Data.Text (Text)
 import Data.List.NonEmpty (NonEmpty(..), (<|))
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import Data.Maybe (listToMaybe)
-import Data.UUID.V4 (nextRandom)
 import Data.Time (getCurrentTime)
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
@@ -296,7 +295,7 @@ runLdapAccountService ::
     => LdapOps
     -> Eff (AccountService : es) a
     -> Eff es a
-runLdapAccountService ops = reinterpret evalServiceState \_ -> \case
+runLdapAccountService ops = reinterpret wrap \_ -> \case
     Login loginOps -> do
         s <- get
         (dn, user, password) <- adapt $ withLdapDefaultBind ops \l ->
@@ -306,7 +305,7 @@ runLdapAccountService ops = reinterpret evalServiceState \_ -> \case
                     bindUser l dn password
                     pure (dn, user, password)
 
-        token <- SessionToken <$> liftIO nextRandom
+        token <- liftIO newSessionToken
         time <- liftIO getCurrentTime
         session <- registerSession user dn password Session
             { username = user.username
@@ -374,7 +373,7 @@ runLdapAccountService ops = reinterpret evalServiceState \_ -> \case
 
         trigger $ OnAccountEmailChanged session email
     where
-        evalServiceState e = do
+        wrap e = do
             let state = ServiceState
                     { ops = ops
                     , sessions = HashMap.empty

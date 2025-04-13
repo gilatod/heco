@@ -7,8 +7,7 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 
 data LanguageEvent
-    = OnReasoningChunkReceived Message
-    | OnReasoningResponseReceived Message
-    | OnDiscourseChunkReceived Message
-    | OnDiscourseResponseReceived Message
+    = OnReasoningChunkReceived Text
+    | OnUtteranceChunkReceived Text
+    | OnMessageReceived Message
     | OnEmbeddingsReceived (Vector Text) (Vector Embedding)

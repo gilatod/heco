@@ -1,0 +1,16 @@
+  throwError, called at heco-database/Heco/Effectful/DatabaseService/Milvus.hs:246:19 in ae-0.1.0.0-inplace-heco-database:Heco.Effectful.DatabaseService.Milvus
+  milvusPost, called at heco-database/Heco/Effectful/DatabaseService/Milvus.hs:408:17 in ae-0.1.0.0-inplace-heco-database:Heco.Effectful.DatabaseService.Milvus
+  handler, called at src/Effectful/Dispatch/Dynamic.hs:478:61 in ffctfl-cr-2.5.1.0-ebc24d89:Effectful.Dispatch.Dynamic
+  send, called at heco-database/Heco/Effectful/DatabaseService.hs:69:1 in ae-0.1.0.0-inplace-heco-database:Heco.Effectful.DatabaseService
+  searchEntities, called at heco-ego/Heco/Effectful/Ego/Heco.hs:158:24 in ae-0.1.0.0-inplace-heco-ego:Heco.Effectful.Ego.Heco
+  associateMemory, called at heco-ego/Heco/Effectful/Ego/Heco.hs:170:20 in ae-0.1.0.0-inplace-heco-ego:Heco.Effectful.Ego.Heco
+  injectMemory, called at heco-ego/Heco/Effectful/Ego/Heco.hs:201:13 in ae-0.1.0.0-inplace-heco-ego:Heco.Effectful.Ego.Heco
+  wrapInteraction, called at heco-ego/Heco/Effectful/Ego/Heco.hs:252:24 in ae-0.1.0.0-inplace-heco-ego:Heco.Effectful.Ego.Heco
+  handler, called at src/Effectful/Dispatch/Dynamic.hs:478:61 in ffctfl-cr-2.5.1.0-ebc24d89:Effectful.Dispatch.Dynamic
+  send, called at heco-ego/Heco/Effectful/Ego.hs:10:1 in ae-0.1.0.0-inplace-heco-ego:Heco.Effectful.Ego
+  interactEgo, called at app/Main.hs:307:13 in ae-0.1.0.0-inplace-my-project-exe:Main
+  testHeco, called at app/Main.hs:338:9 in ae-0.1.0.0-inplace-my-project-exe:Main
+HasCallStack backtrace:
+  collectBacktraces, called at libraries/ghc-internal/src/GHC/Internal/Exception.hs:92:13 in ghc-internal:GHC.Internal.Exception
+  toExceptionWithBacktrace, called at libraries/ghc-internal/src/GHC/Internal/IO.hs:260:11 in ghc-internal:GHC.Internal.IO
+  throwIO, called at libraries/ghc-internal/src/GHC/Internal/Control/Exception/Base.hs:195:43 in ghc-internal:GHC.Internal.Control.Exception.Base

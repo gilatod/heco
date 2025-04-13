@@ -1,23 +1,22 @@
-{-# LANGUAGE DeriveAnyClass #-}
-
 module Main (main) where
 
 import Heco.Data.FunctionSchema
-    ( FunctionSchema(..),
+    ( describe,
+      optional,
       propArray,
-      ParametricSpec(spec),
-      ArraySpec(..),
-      ArrayItemSpec(..), describe, DataSchema(ObjectSchema), propString, optional )
+      propString,
+      ArrayItemSpec(ArrayItems),
+      ArraySpec(items),
+      DataSchema(ObjectSchema),
+      FunctionSchema(FunctionSchema),
+      ParametricSpec(spec) )
 import Heco.Data.Default ()
 import Heco.Data.AuthGroup (AuthGroup(..))
-import Heco.Data.Role (Role(..))
-import Heco.Data.Message (Message(..))
+import Heco.Data.Message (Message(..), newSystemMessage, newUserMessage, formatMessage, ToolResponse(..))
 import Heco.Data.Embedding (Embedding(Embedding))
 import Heco.Data.Entity (EntityId)
 import Heco.Data.Entity.TH (deriveEntity)
-import Heco.Data.Collection (CollectionName(CollectionName))
-import Heco.Data.TimePhase (ImmanantContent(..), SenseData(..))
-import Heco.Data.Model (ModelName(ModelName))
+import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Data.LanguageError (LanguageError)
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Events.EgoEvent (EgoEvent(..))
@@ -37,18 +36,20 @@ import Heco.Effectful.AccountService.Ldap
 import Heco.Effectful.PrivilegeService (runSimplePrivilegeService)
 import Heco.Effectful.SessionContext (getSessionContext, SessionContext)
 import Heco.Effectful.LanguageService (chatOps)
-import Heco.Effectful.LanguageService.OpenAI (OpenAIOps(..), runOpenAILanguageService)
+import Heco.Effectful.LanguageService.OpenAI (OpenAIOps(..), runOpenAILanguageService, openaiOps)
 import Heco.Effectful.LanguageService.Ollama (OllamaOps(..), runOllamaLanguageService)
+import Heco.Effectful.LanguageToolProvider.Simple (runSimpleLanguageToolProviderEx, LanguageTool(..))
 import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
 import Heco.Effectful.DatabaseService
-    ( DatabaseService,
+    ( SearchOps(..),
+      DatabaseService,
       addEntity,
       getEntities,
       loadCollection, setEntity_ )
+import Heco.Effectful.InternalTimeStream (InternalTimeStream, enrichUrimpression_, enrichUrimpressionSingle_)
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps (RingBufferOps, capacity), runRingBufferInternalTimeStreamEx)
 import Heco.Effectful.Ego (Ego, interactEgo)
-import Heco.Effectful.Ego.Heco (runHecoEgoEx, HecoOps(..))
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, enrichUrimpression_)
+import Heco.Effectful.Ego.Heco (runHecoEgoEx, HecoOps(..), immanantContentXMLFormatter, hecoMemoryOps, HecoMemoryOps(..))
 
 import Effectful (runEff, liftIO, Eff, IOE, (:>))
 import Effectful.Fail (runFailIO)
@@ -60,18 +61,20 @@ import Effectful.Labeled (runLabeled, Labeled (Labeled))
 
 import Data.Default (Default(..))
 import Data.HashSet qualified as HashSet
-import Data.List.NonEmpty (appendList, singleton)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
 import Data.Function ((&))
+import Data.HashMap.Strict qualified as HashMap
+import Data.Aeson qualified as Aeson
 
-import Control.Monad (when)
+import Control.Monad (when, forM_)
 import System.IO (stdout)
 import GHC.IO.Handle (hFlush)
 import GHC.Generics (Generic)
+import Pattern.Cast (Cast(cast))
 
 ldapOps :: LdapOps
 ldapOps = LdapOps
@@ -99,19 +102,11 @@ ollamaOps = OllamaOps
     { url = "http://127.0.0.1:11434"
     , timeout = Nothing }
 
-createOpenAIOps :: IO OpenAIOps
-createOpenAIOps = do
+newOpenAIOps :: IO OpenAIOps
+newOpenAIOps = do
     token <- readFile "./tokens/openrouter.txt"
-    pure OpenAIOps
-        { url = "https://openrouter.ai/api/v1"
-        , timeout = Nothing
-        , token = Just $ T.pack token }
-
-ollamaOpenAIOps :: OpenAIOps
-ollamaOpenAIOps = OpenAIOps
-    { url = "http://127.0.0.1:11434/v1"
-    , timeout = Nothing
-    , token = Nothing }
+    pure $ (openaiOps "https://openrouter.ai/api/v1")
+        { token = Just $ T.pack token }
 
 milvusOps :: MilvusOps
 milvusOps = MilvusOps
@@ -119,25 +114,6 @@ milvusOps = MilvusOps
     , timeout = Nothing
     , token = Nothing
     , database = Just "heco" }
-
-createHecoOps :: IO HecoOps
-createHecoOps = do
-    characterPrompt <- readFile "./prompts/character.md"
-    interactionMainPrompt <- readFile "./prompts/interaction_main.md"
-    retentionPrompt <- readFile "./prompts/retention.md"
-    associationPrompt <- readFile "./prompts/association.md"
-    urimpressionPrompt <- readFile "./prompts/urimpression.md"
-    pure HecoOps
-        { characterPrompt = T.pack characterPrompt
-        , interactionMainPrompt = T.pack interactionMainPrompt
-        , retentionPrompt = T.pack retentionPrompt
-        , associationPrompt = T.pack associationPrompt
-        , urimpressionPrompt = T.pack urimpressionPrompt
-        , toolsPrompt = ""
-        , memoryCollection = CollectionName "memory"
-        , memorySearchLimit = Just 10
-        , chatOps = chatOps "deepseek/deepseek-r1"
-        , memoryEmbeddingModel = ModelName "mxbai-embed-large" }
 
 groups :: [AuthGroup]
 groups =
@@ -197,49 +173,44 @@ testChat ::
     => Eff es ()
 testChat = do
     token <- login $ UsernameLoginOps "test" "Holders-instance-14-sulfur"
-    prompt <- Message System <$> (liftIO . fmap T.pack . readFile $ "prompt.txt")
-    evalState True $ doChat token (singleton prompt)
+    prompt <- newSystemMessage "You are a helpful assistant."
+    evalState True $ doChat token (V.singleton prompt)
         `on` \case
-            OnReasoningChunkReceived msg -> liftIO do
-                T.putStr $ msg.content
+            OnReasoningChunkReceived content -> liftIO do
+                T.putStr content
                 hFlush stdout
-            OnDiscourseChunkReceived msg -> do
+            OnUtteranceChunkReceived content -> do
                 reasoning <- get
                 when reasoning do
                     put False
                     liftIO $ putStrLn "==============="
-                liftIO $ T.putStr $ msg.content
+                liftIO $ T.putStr content
                 liftIO $ hFlush stdout
-            OnDiscourseResponseReceived _ -> liftIO $ putStrLn ""
+            OnMessageReceived (AssistantMessage _ _ toolCalls) -> do
+                forM_ toolCalls \toolCall ->
+                    liftIO $ putStrLn $ show toolCall
+                liftIO $ putStrLn ""
             _ -> pure ()
     where
         doChat token messages = do
             liftIO $ putStr "> " >> hFlush stdout
             input <- liftIO $ getLine
             put True
-            let messages' = appendList messages [Message User $ T.pack input]
-            msg <- chat r1ChatOps messages'
-            doChat token $ appendList messages' [msg]
+            msg <- newUserMessage $ T.pack input
+            let messages' = V.snoc messages msg
+            msg <- chat ops messages'
+            doChat token $ V.snoc messages' msg
 
-        r1ChatOps = (chatOps "google/gemini-2.5-pro-exp-03-25:free")
-            { tools = [schema]
-            , stream = False
-            , providers = Nothing }
-
-        schema = FunctionSchema "get_weather" (Just "Get weather from given locations and datetimes") $ spec
-            [ propArray "location" $ def
-                { items = ArrayItems $ ObjectSchema $ spec
-                    [ propString "name" def
-                        & describe "Name of location, e.g. San Francisco, CA"
-                    , propString "datetime" def
-                        & optional
-                        & describe "Date or time, e.g. today, tomorrow, 2023-06-29" ] } ]
+        ops = (chatOps "deepseek/deepseek-chat-v3-0324:free")
+            { stream = True }
 
 data TestEntity = TestEntity
     { id :: Maybe EntityId
     , vector :: Maybe (VU.Vector Float)
     , text :: Text }
-    deriving (Show, Generic, Default)
+    deriving (Show, Generic)
+
+instance Default TestEntity
 
 deriveEntity ''TestEntity
 
@@ -284,58 +255,85 @@ testHeco ::
     => Eff es ()
 testHeco = evalState True $ doChat
     `on` \case
-        OnEgoTaskGenerated msg -> liftIO do
-            T.putStrLn msg
+        OnEgoInputMessagesGenerated msgs -> liftIO do
+            --V.forM_ msgs $ T.putStrLn . formatMessage
+            pure ()
         _ -> pure ()
     `on` \case
-        OnReasoningChunkReceived msg -> liftIO do
-            T.putStr $ msg.content
+        OnReasoningChunkReceived content -> liftIO do
+            T.putStr content
             hFlush stdout
-        OnDiscourseChunkReceived msg -> do
+        OnUtteranceChunkReceived content -> do
             reasoning <- get
             when reasoning do
                 put False
                 liftIO $ putStrLn "==============="
-            liftIO $ T.putStr $ msg.content
+            liftIO $ T.putStr content
             liftIO $ hFlush stdout
-        OnDiscourseResponseReceived _ -> liftIO $ putStrLn ""
+        OnMessageReceived (AssistantMessage _ _ toolCalls) -> do
+            forM_ toolCalls \toolCall ->
+                liftIO $ putStrLn $ show toolCall
+            liftIO $ putStrLn ""
         _ -> pure ()
     where
         doChat = do
             liftIO $ putStr "> " >> hFlush stdout
             input <- liftIO $ getLine
             put True
+
             interactEgo do
-                enrichUrimpression_ $ V.singleton $
-                    SenseDataContent $ OlfactorySenseData "泥土的气味"
-                enrichUrimpression_ $ V.singleton $
-                    SenseDataContent $ AcousticSenseData "细微的雨声"
-                enrichUrimpression_ $ V.singleton $
-                    SenseDataContent $ VisualSenseData $ "User: " <> T.pack input
+                enrichUrimpression_ $ V.fromList
+                    [ cast $ TerminalChat 1 $ "User: " <> T.pack input ]
             doChat
+
+newHecoOps :: IO HecoOps
+newHecoOps = do
+    characterPrompt <- readFile "./prompts/character.md"
+    taskPrompt <- readFile "./prompts/task.md"
+    pure HecoOps
+        { characterPrompt = T.pack characterPrompt
+        , taskPrompt = T.pack taskPrompt
+        , chatOps = (chatOps "deepseek/deepseek-chat-v3-0324")
+        , immanantContentFormatter = immanantContentXMLFormatter
+        , memoryOps = (hecoMemoryOps "memory" "bge-m3")
+            { searchOps = def
+                { limit = Just 10
+                , radius = Just 0.05
+                , rangeFilter = Just 1 } }
+        , messageCacheLimit = Just 64 }
+
+languageTools :: [LanguageTool es]
+languageTools =
+    [ LanguageTool
+        { schema = FunctionSchema "get_weather" (Just "Get weather from given locations and datetimes") $ spec
+            [ propArray "locations" $ def
+                { items = ArrayItems $ ObjectSchema $ spec
+                    [ propString "name" def
+                        & describe "Name of location, e.g. San Francisco, CA"
+                    , propString "datetime" def
+                        & optional
+                        & describe "Date or time, e.g. today, tomorrow, 2023-06-29" ] } ]
+        , handler = \args ->
+            pure $ Aeson.toJSON $ HashMap.fromList @Text @Float [("temperature", 36)] } ]
 
 main :: IO ()
 main = do
-    hecoOps <- createHecoOps
-    openaiOps <- createOpenAIOps
+    hecoOps <- newHecoOps
+    openaiOps <- newOpenAIOps
     let run = runEff . runFailIO . runConcurrent
             . runSimplePrivilegeService groups
             . eitherThrowIO . runCombinedLanguageService openaiOps ollamaOps
             . eitherThrowIO . runLdapAccountServiceEx ldapOps
             . eitherThrowIO . runMilvusDatabaseServiceEx milvusOps
             . eitherThrowIO . runRingBufferInternalTimeStreamEx RingBufferOps { capacity = 20 }
+            . eitherThrowIO . runSimpleLanguageToolProviderEx languageTools
             . eitherThrowIO . runHecoEgoEx hecoOps
     _ <- run do
+        -- embed "bge-m3" "介绍一下新艾利都" >>= liftIO . putStrLn . show
         -- content <- liftIO $ readFile "test.csv"
-        -- let contents = flip V.map (V.fromList $ lines content)
-        --         $ ActionContent . StatementAction . T.pack
+        -- let lineVec = V.fromList $ lines content
+        --     contents = V.map (cast . StatementAction . T.pack) lineVec
         -- enrichUrimpression_ contents
-        -- [Embedding vector] <- embed "mxbai-embed-large" ["雨声"]
-        -- addEntity_ "memory" MemoryEntity
-        --     { id = Nothing
-        --     , vector = Just vector
-        --     , create_time = Nothing
-        --     , _type = "accustic_data"
-        --     , content = "Fairy 讨厌雨声" }
-        testChat
+        -- testChat
+        testHeco
     pure ()

@@ -9,7 +9,6 @@ import Effectful (Effect, Eff, (:>))
 import Effectful.TH (makeEffect)
 import Effectful.Dispatch.Dynamic (HasCallStack)
 
-import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Vector (Vector)
 
@@ -49,14 +48,14 @@ chatOpsNoStream name = ChatOps
     , frequencyPenalty = Nothing }
 
 data LanguageService :: Effect where
-    Chat :: ChatOps -> NonEmpty Message -> LanguageService m Message
+    Chat :: ChatOps -> Vector Message -> LanguageService m Message
     Embed :: ModelName -> Text -> LanguageService m Embedding
     EmbedMany :: ModelName -> Vector Text -> LanguageService m (Vector Embedding)
 
 makeEffect ''LanguageService
 
 chat_ :: (HasCallStack, LanguageService :> es)
-    => ChatOps -> NonEmpty Message -> Eff es ()
+    => ChatOps -> Vector Message -> Eff es ()
 chat_ model msgs = chat model msgs >> pure ()
 
 embed_ :: (HasCallStack, LanguageService :> es)

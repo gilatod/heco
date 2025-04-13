@@ -1,6 +1,6 @@
 module Heco.Effectful.InternalTimeStream.RingBuffer where
 
-import Heco.Data.TimePhase (TimePhase(..), emptyTimePhase)
+import Heco.Data.TimePhase (TimePhase(..), newTimePhase)
 import Heco.Data.InternalTimeStreamError (InternalTimeStreamError(..))
 import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
@@ -34,7 +34,7 @@ runRingBufferInternalTimeStream ::
     => RingBufferOps
     -> Eff (InternalTimeStream : es) a
     -> Eff es a
-runRingBufferInternalTimeStream ops = reinterpret evalServiceState \_ -> \case
+runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
     ProgressUrimpression -> do
         state <- ask @ServiceState
 
@@ -42,26 +42,24 @@ runRingBufferInternalTimeStream ops = reinterpret evalServiceState \_ -> \case
             retention = state.retention
             capacity = RingBuffer.capacity retention
 
-        modifyMVar urimpression \uri@(TimePhase contents) -> do
-            if V.length contents == 0
-                then pure (uri, uri)
-                else do
-                    length <- liftIO $ RingBuffer.length retention
-                    lostPhase <- if length == capacity
-                        then liftIO $ RingBuffer.latest retention (capacity - 1)
-                        else pure Nothing
+        modifyMVar urimpression \uri -> do
+            length <- liftIO $ RingBuffer.length retention
+            lostPhase <- if length == capacity
+                then liftIO $ RingBuffer.latest retention (capacity - 1)
+                else pure Nothing
 
-                    liftIO $ RingBuffer.append uri retention
-                    whenJust lostPhase $ trigger . OnTimePhaseLost
-                    trigger $ OnTimePhaseRetented uri
+            liftIO $ RingBuffer.append uri retention
+            whenJust lostPhase $ trigger . OnTimePhaseLost
+            trigger $ OnTimePhaseRetented uri
 
-                    pure (emptyTimePhase, uri)
+            timePhase <- newTimePhase mempty
+            pure (timePhase, uri)
         `catchIO` (\e -> throwError . UnhandledInternalTimeStreamError $ displayException e)
 
     EnrichUrimpression newContents -> do
         state <- ask @ServiceState
-        modifyMVar state.urimpression \(TimePhase contents) -> do
-            let enriched = TimePhase $ newContents <> contents
+        modifyMVar state.urimpression \(TimePhase uuid contents) -> do
+            let enriched = TimePhase uuid $ newContents <> contents
             trigger $ OnTimePhaseEnriched enriched newContents
             pure (enriched, enriched)
 
@@ -84,9 +82,10 @@ runRingBufferInternalTimeStream ops = reinterpret evalServiceState \_ -> \case
         pure $ RingBuffer.capacity state.retention
 
     where
-        evalServiceState e = do
+        wrap e = do
             buffer <- liftIO $ RingBuffer.new ops.capacity
-            urimpression <- newMVar emptyTimePhase
+            timePhase <- newTimePhase mempty
+            urimpression <- newMVar timePhase
             let state = ServiceState
                     { urimpression = urimpression
                     , retention = buffer }

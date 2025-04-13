@@ -1,9 +1,9 @@
 module Heco.Events.EgoEvent where
 
-import Data.Text (Text)
+import Heco.Data.Message (Message)
+import Data.Vector (Vector)
 
 data EgoEvent
     = OnEgoInteractionStarted
-    | OnEgoTaskGenerated Text
-    | OnEgoTaskResponded Text
-    | OnEgoInteractionCompleted
+    | OnEgoInteractionCompleted Message
+    | OnEgoInputMessagesGenerated (Vector Message)

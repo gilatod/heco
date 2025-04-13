@@ -11,7 +11,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.ByteString (ByteString)
 import Data.CaseInsensitive (CI)
-import Debug.Trace (traceShow)
 
 type Headers = [(CI ByteString, ByteString)]
 
@@ -20,7 +19,7 @@ httpRequest method url headers body = do
     prevReq <- parseRequest $ T.unpack url
     pure $ prevReq
         { method = method
-        , requestBody = traceShow (Aeson.encode body) RequestBodyLBS $ Aeson.encode body
+        , requestBody = RequestBodyLBS $ Aeson.encode body
         , requestHeaders = headers }
 
 httpGet :: ToJSON body => Text -> Headers -> body -> IO Request

@@ -72,6 +72,7 @@ library heco-common
     Heco.Data.Aeson,
     Heco.Data.Record,
     Heco.Data.Default,
+    Heco.Data.Unique,
     Heco.Network.HTTP.Client,
     Heco.Effectful.Exception,
     Heco.Effectful.HTTP
@@ -103,8 +104,7 @@ library heco-account
     Heco.Effectful.SessionContext
   build-depends:
     heco-event,
-    ldap-client,
-    uuid
+    ldap-client
 
 library heco-language
   import: defaults
@@ -117,12 +117,15 @@ library heco-language
     Heco.Data.FunctionSchema,
     Heco.Data.FunctionSchema.JSON,
     Heco.Data.LanguageError,
+    Heco.Data.LanguageToolError,
     Heco.Data.Embedding,
     Heco.Events.LanguageEvent,
     Heco.Effectful.LanguageService,
     Heco.Effectful.LanguageService.Common,
     Heco.Effectful.LanguageService.Ollama,
-    Heco.Effectful.LanguageService.OpenAI
+    Heco.Effectful.LanguageService.OpenAI,
+    Heco.Effectful.LanguageToolProvider,
+    Heco.Effectful.LanguageToolProvider.Simple,
   build-depends:
     heco-common,
     heco-event,
@@ -130,6 +133,7 @@ library heco-language
     http-client,
     http-client-tls,
     http-conduit,
+    lrucache,
     conduit
 
 library heco-database
@@ -156,9 +160,10 @@ library heco-subjectivity
   default-language: GHC2024
   hs-source-dirs: heco-subjectivity
   exposed-modules:
-    Heco.Data.Memory,
     Heco.Data.Noema,
     Heco.Data.TimePhase,
+    Heco.Data.Immanant.SenseData,
+    Heco.Data.Immanant.Action,
     Heco.Data.InternalTimeStreamError,
     Heco.Effectful.InternalTimeStream,
     Heco.Effectful.InternalTimeStream.RingBuffer,
@@ -173,6 +178,8 @@ library heco-ego
   default-language: GHC2024
   hs-source-dirs: heco-ego
   exposed-modules:
+    Heco.Data.Immanant.Memory,
+    Heco.Data.Immanant.Terminal,
     Heco.Data.EgoError,
     Heco.Events.EgoEvent,
     Heco.Effectful.Ego,
@@ -184,7 +191,8 @@ library heco-ego
     heco-language,
     heco-database,
     heco-subjectivity,
-    text-time
+    text-time,
+    lrucache
 
 executable my-project-exe
   import: defaults
@@ -202,11 +210,6 @@ executable my-project-exe
     heco-ego,
     http-client,
     http-client-tls
-  if os(wasi)
-      ghc-options:
-        -no-hs-main
-        -optl-mexec-model=reactor
-        "-optl-Wl,--export=hs_init,--export=myMain"
 
 test-suite my-project-test
   import: defaults

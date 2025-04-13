@@ -150,8 +150,8 @@ data MilvusQueryOps = MilvusQueryOps
 deriveToJSON defaultAesonOps ''MilvusQueryOps
 
 data MilvusSearchExtraParams = MilvusSearchExtraParams
-    { radius :: Maybe Int
-    , range_filter :: Maybe Int }
+    { radius :: Maybe Float
+    , range_filter :: Maybe Float }
 
 data MilvusSearchParams = MilvusSearchParams
     { params :: MilvusSearchExtraParams }
@@ -178,8 +178,8 @@ data MilvusDeleteOps = MilvusDeleteOps
 
 deriveToJSON defaultAesonOps ''MilvusDeleteOps
 
-getMilvusSearchParams :: SearchOps -> Maybe MilvusSearchParams
-getMilvusSearchParams ops = get ops.radius ops.rangeFilter
+newMilvusSearchParams :: SearchOps -> Maybe MilvusSearchParams
+newMilvusSearchParams ops = get ops.radius ops.rangeFilter
     where
         get Nothing Nothing = Nothing
         get r f = Just MilvusSearchParams
@@ -404,14 +404,14 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
             Nothing -> throwInvalidResponseError
             Just es -> pure es
 
-    SearchEntities @e (CollectionName col) searchOps -> do
+    SearchEntities @e (CollectionName col) searchOps vectors -> do
         resp <- milvusPost @(MilvusGetResp e) ops "/vectordb/entities/search"
             MilvusSearchOps
                 { dbName = ops.database
                 , collectionName = col
-                , _data = searchOps.vectors
+                , _data = vectors
                 , annsField = "vector"
-                , searchParams = getMilvusSearchParams searchOps
+                , searchParams = newMilvusSearchParams searchOps
                 , filter = searchOps.filter
                 , limit = searchOps.limit
                 , offset = searchOps.offset

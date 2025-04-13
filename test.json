@@ -1,36 +1,51 @@
 {
-    "id": "gen-1743604269-3i86VGDI3RHDWhp7SlXN",
-    "provider": "Google AI Studio",
-    "model": "google/gemini-2.5-pro-exp-03-25",
-    "object": "chat.completion",
-    "created": 1743604269,
+    "id": "gen-1744549573-zWAkO2SNZlaCyKPlVhAY",
+    "provider": "Novita",
+    "model": "deepseek/deepseek-chat-v3-0324",
+    "object": "chat.completion.chunk",
+    "created": 1744549573,
     "choices": [
         {
-            "logprobs": null,
-            "finish_reason": "tool_calls",
-            "native_finish_reason": "STOP",
             "index": 0,
-            "message": {
+            "delta": {
                 "role": "assistant",
-                "content": "",
-                "refusal": null,
                 "tool_calls": [
                     {
                         "index": 0,
-                        "id": "tool_0_get_weather",
-                        "type": "function",
+                        "id": "",
+                        "type": "",
                         "function": {
-                            "name": "get_weather",
-                            "arguments": "{\"location\":[{\"datetime\":\"today\",\"name\":\"Huzhou\"}]}"
+                            "arguments": "}"
                         }
                     }
                 ]
-            }
+            },
+            "finish_reason": null,
+            "content_filter_results": {
+                "hate": {
+                    "filtered": false
+                },
+                "self_harm": {
+                    "filtered": false
+                },
+                "sexual": {
+                    "filtered": false
+                },
+                "violence": {
+                    "filtered": false
+                },
+                "jailbreak": {
+                    "filtered": false,
+                    "detected": false
+                },
+                "profanity": {
+                    "filtered": false,
+                    "detected": false
+                }
+            },
+            "logprobs": null,
+            "native_finish_reason": null
         }
     ],
-    "usage": {
-        "prompt_tokens": 142,
-        "completion_tokens": 27,
-        "total_tokens": 169
-    }
+    "system_fingerprint": ""
 }
