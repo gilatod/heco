@@ -1,0 +1,77 @@
+cabal-version: 3.0
+
+name:           heco-database
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/sicusa/ae#readme>
+homepage:       https://github.com/sicusa/ae#readme
+bug-reports:    https://github.com/sicusa/ae/issues
+author:         Phlamcenth Sicusa
+maintainer:     sicusa@gilatod.art
+copyright:      2024 Phlamcenth Sicusa
+license:        BSD-3-Clause
+license-file:   LICENSE
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/sicusa/ae
+
+common defaults
+  default-extensions:
+    BlockArguments
+    LexicalNegation
+    RecordWildCards
+    OverloadedRecordDot
+    OverloadedLabels
+    OverloadedStrings
+    DuplicateRecordFields
+    NoFieldSelectors
+    TypeFamilies
+    AllowAmbiguousTypes
+    TemplateHaskell
+    Strict
+  ghc-options:
+    -Wall
+    -Wno-name-shadowing
+    -Wno-ambiguous-fields
+    -Wredundant-constraints
+  build-depends:
+    base,
+    extra,
+    template-haskell,
+    pointed,
+    effectful,
+    effectful-core,
+    effectful-th,
+    vector,
+    vector-algorithms,
+    unboxing-vector,
+    containers,
+    unordered-containers,
+    text,
+    bytestring,
+    time,
+    data-default,
+    hashable,
+    cast,
+    aeson,
+    case-insensitive
+
+library
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: src
+  exposed-modules:
+    Heco.Data.Entity,
+    Heco.Data.Entity.TH,
+    Heco.Data.Collection,
+    Heco.Data.DatabaseError,
+    Heco.Events.DatabaseEvent,
+    Heco.Effectful.DatabaseService,
+    Heco.Effectful.DatabaseService.Milvus
+  build-depends:
+    heco-common,
+    heco-event,
+    heco-account,
+    http-client,
+    http-client-tls

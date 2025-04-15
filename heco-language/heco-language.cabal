@@ -1,0 +1,91 @@
+cabal-version: 3.0
+
+name:           heco-language
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/sicusa/ae#readme>
+homepage:       https://github.com/sicusa/ae#readme
+bug-reports:    https://github.com/sicusa/ae/issues
+author:         Phlamcenth Sicusa
+maintainer:     sicusa@gilatod.art
+copyright:      2024 Phlamcenth Sicusa
+license:        BSD-3-Clause
+license-file:   LICENSE
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/sicusa/ae
+
+common defaults
+  default-extensions:
+    BlockArguments
+    LexicalNegation
+    RecordWildCards
+    OverloadedRecordDot
+    OverloadedLabels
+    OverloadedStrings
+    DuplicateRecordFields
+    NoFieldSelectors
+    TypeFamilies
+    AllowAmbiguousTypes
+    TemplateHaskell
+    Strict
+  ghc-options:
+    -Wall
+    -Wno-name-shadowing
+    -Wno-ambiguous-fields
+    -Wredundant-constraints
+  build-depends:
+    base,
+    extra,
+    template-haskell,
+    pointed,
+    effectful,
+    effectful-core,
+    effectful-th,
+    vector,
+    vector-algorithms,
+    unboxing-vector,
+    containers,
+    unordered-containers,
+    text,
+    bytestring,
+    time,
+    data-default,
+    hashable,
+    cast,
+    aeson,
+    case-insensitive
+
+library
+  import: defaults
+  default-language: GHC2024
+  hs-source-dirs: src
+  exposed-modules:
+    Heco.Data.Model,
+    Heco.Data.Message,
+    Heco.Data.Role,
+    Heco.Data.FunctionSchema,
+    Heco.Data.FunctionSchema.JSON,
+    Heco.Data.LanguageTool,
+    Heco.Data.LanguageError,
+    Heco.Data.LanguageToolError,
+    Heco.Data.Embedding,
+    Heco.Events.LanguageEvent,
+    Heco.Effectful.LanguageToolProvider,
+    Heco.Effectful.LanguageToolProvider.Native,
+    Heco.Effectful.LanguageService,
+    Heco.Effectful.LanguageService.Common,
+    Heco.Effectful.LanguageService.Ollama,
+    Heco.Effectful.LanguageService.OpenAI
+  build-depends:
+    heco-common,
+    heco-event,
+    heco-account,
+    http-client,
+    http-client-tls,
+    http-conduit,
+    lrucache,
+    conduit,
+    uuid,
+    network-uri

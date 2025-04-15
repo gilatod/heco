@@ -1,15 +1,14 @@
-multi-repl: True
-packages: .
+packages:
+  heco
+  heco-account
+  heco-common
+  heco-database
+  heco-ego
+  heco-event
+  heco-language
+  heco-subjectivity
 
-if arch(wasm32)
-  -- Required for TemplateHaskell. When using wasm32-wasi-cabal from
-  -- ghc-wasm-meta, this is superseded by the global cabal.config.
-  shared: True
+allow-newer:
+  base,
 
-  -- https://github.com/haskellari/time-compat/issues/37
-  -- Older versions of time don't build on WASM.
-  constraints: time installed
-  allow-newer: time
-
-package aeson
-  flags: -ordered-keymap
+with-compiler: ghc-9.12.2
