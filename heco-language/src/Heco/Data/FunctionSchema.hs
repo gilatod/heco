@@ -218,8 +218,6 @@ propNull name = property name NullSchema
 class HasDataSchema t where
     dataSchema :: DataSchema
 
---class Generic t => HasDataSchema (Default t) where
-
 instance HasDataSchema Int where dataSchema = IntegerSchema def
 instance HasDataSchema Integer where dataSchema = IntegerSchema def
 instance HasDataSchema Natural where dataSchema = IntegerSchema def
@@ -227,9 +225,9 @@ instance HasDataSchema Natural where dataSchema = IntegerSchema def
 instance HasDataSchema Float where dataSchema = NumberSchema def
 instance HasDataSchema Double where dataSchema = NumberSchema def
 
-instance HasDataSchema Bool where dataSchema = NumberSchema def
-instance HasDataSchema All where dataSchema = NumberSchema def
-instance HasDataSchema Any where dataSchema = NumberSchema def
+instance HasDataSchema Bool where dataSchema = BoolSchema
+instance HasDataSchema All where dataSchema = BoolSchema
+instance HasDataSchema Any where dataSchema = BoolSchema
 
 instance HasDataSchema String where dataSchema = StringSchema def
 instance HasDataSchema Key where dataSchema = StringSchema def
