@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 {-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DerivingVia #-}
 

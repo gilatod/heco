@@ -1,8 +1,5 @@
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE UndecidableInstances #-}
-
 module Heco.Data.LanguageTool where
 
 import Heco.Data.FunctionSchema (FunctionSchema(..), ObjectSpec(..), PropertySchema(..), HasDataSchema(..))
