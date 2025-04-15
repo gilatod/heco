@@ -1,6 +1,3 @@
-{-# OPTIONS_GHC -Wno-redundant-constraints #-}
-{-# LANGUAGE RequiredTypeArguments #-}
-
 module Heco.Data.Record where
 
 import GHC.Generics ((:*:), M1, K1, D, C, S, R, selName, Selector, Rep)
@@ -24,7 +21,7 @@ instance (Selector s, Typeable t) => RecordFields (M1 S s (K1 R t)) where
     recordFieldsImpl =
         [RecordField
             { name = selName (undefined :: M1 S s (K1 R t) ())
-            , typeRep = typeRep (Proxy :: Proxy t) } ]
+            , typeRep = typeRep (Proxy :: Proxy t) }]
 
 instance (RecordFields a, RecordFields b) => RecordFields (a :*: b) where
     recordFieldsImpl = recordFieldsImpl @a ++ recordFieldsImpl @b
@@ -54,7 +51,7 @@ instance (Selector s, Typeable t, c t) => RecordFieldsEx c ex (M1 S s (K1 R t)) 
         [RecordFieldEx
             { name = selName (undefined :: M1 S s (K1 R t) ())
             , typeRep = typeRep (Proxy :: Proxy t)
-            , extra = f (Proxy :: Proxy t) } ]
+            , extra = f (Proxy :: Proxy t) }]
 
 instance (RecordFieldsEx c ex a, RecordFieldsEx c ex b) => RecordFieldsEx c ex (a :*: b) where
     recordFieldsExImpl f = recordFieldsExImpl @c @ex @a f ++ recordFieldsExImpl @c @ex @b f
