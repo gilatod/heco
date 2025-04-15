@@ -1,7 +1,8 @@
 module Heco.Effectful.LanguageToolProvider.Native where
 
 import Heco.Data.LanguageToolError (LanguageToolError(LanguageToolNotFoundError))
-import Heco.Data.LanguageTool (AnyLanguageTool(..), invokeLanguageTool, languageToolName_, languageToolSchema_)
+import Heco.Data.FunctionSchema (FunctionSchema(..))
+import Heco.Data.LanguageTool (LanguageToolSpec(..))
 import Heco.Effectful.LanguageToolProvider (LanguageToolProvider(..))
 
 import Effectful (Eff, (:>))
@@ -15,7 +16,7 @@ import Data.Function ((&))
 runNativeLanguageToolProvider ::
     ( HasCallStack
     , Error LanguageToolError :> es )
-    => [AnyLanguageTool es]
+    => [LanguageToolSpec es]
     -> Eff (LanguageToolProvider : es) a
     -> Eff es a
 runNativeLanguageToolProvider tools = interpret \_ -> \case
@@ -24,15 +25,15 @@ runNativeLanguageToolProvider tools = interpret \_ -> \case
         case HashMap.lookup name toolMap of
             Nothing -> throwError $ LanguageToolNotFoundError $
                 "language tool not found: " ++ T.unpack name
-            Just (AnyLanguageTool tool) -> invokeLanguageTool args tool
+            Just spec -> spec.handler args
     where
-        schemas = map (\(AnyLanguageTool tool) -> languageToolSchema_ tool) tools
+        schemas = map (\spec -> spec.schema) tools
         toolMap = HashMap.fromList $
-            tools & map \rawTool@(AnyLanguageTool tool) -> (languageToolName_ tool, rawTool)
+            tools & map \spec -> (spec.schema.name, spec)
 
 runNativeLanguageToolProviderEx ::
     HasCallStack
-    => [AnyLanguageTool (Error LanguageToolError : es)]
+    => [LanguageToolSpec (Error LanguageToolError : es)]
     -> Eff (LanguageToolProvider : Error LanguageToolError : es) a
     -> Eff es (Either (CallStack, LanguageToolError) a)
 runNativeLanguageToolProviderEx tools =

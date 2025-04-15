@@ -24,7 +24,7 @@ import Heco.Data.Embedding (Embedding(Embedding))
 import Heco.Data.Entity (EntityId)
 import Heco.Data.Entity.TH (deriveEntity)
 import Heco.Data.Immanant.Terminal (Terminal(..))
-import Heco.Data.LanguageTool (LanguageTool(..), AnyLanguageTool(..), Param, ParamDesc, Ret)
+import Heco.Data.LanguageTool (LanguageTool(..), LanguageToolSpec(..), Param, ParamDesc, Ret)
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.LanguageToolError (LanguageToolError(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
@@ -317,10 +317,10 @@ adderTool :: LanguageTool es
     (ParamDesc "a" Float "Number 1" -> ParamDesc "b" Float "Number 2" -> Ret Float)
 adderTool = LanguageTool \a b -> pure $ a + b
 
-languageTools :: forall es.
-    Error LanguageToolError :> es
-    => [AnyLanguageTool es]
-languageTools = [cast $ weatherTool @es, cast $ adderTool @es]
+languageTools :: forall es. Error LanguageToolError :> es => [LanguageToolSpec es]
+languageTools =
+    [ cast $ weatherTool @es
+    , cast $ adderTool @es ]
 
 main :: IO ()
 main = do

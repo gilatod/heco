@@ -22,6 +22,10 @@ import Data.Typeable (Typeable, typeRepTyCon, tyConName, typeRep)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import Pattern.Cast (Cast(..))
 
+data LanguageToolSpec es = LanguageToolSpec
+    { schema :: FunctionSchema
+    , handler :: HashMap Text Value -> Eff es Value }
+
 data Param (name :: Symbol) t
 data ParamDesc (name :: Symbol) t (desc :: Symbol)
 data Ret t
@@ -30,6 +34,7 @@ type family LanguageHandler es f where
     LanguageHandler es (Param name t -> b) = t -> LanguageHandler es b
     LanguageHandler es (ParamDesc name t desc -> b) = t -> LanguageHandler es b
     LanguageHandler es (Ret r) = Eff es r
+    LanguageHandler es r = Eff es r
 
 newtype LanguageTool es (name :: Symbol) (desc :: Symbol) handler = LanguageTool (LanguageHandler es handler)
 
@@ -150,3 +155,11 @@ languageToolSchema_ :: forall t es name desc handler.
     , InvokableLanguageTool es t )
     => t -> FunctionSchema
 languageToolSchema_ _ = languageToolSchema @t
+
+instance
+    ( InvokableLanguageTool es (LanguageTool es name desc handler)
+    , KnownSymbol name, KnownSymbol desc )
+    => Cast (LanguageTool es name desc handler) (LanguageToolSpec es) where
+    cast tool = LanguageToolSpec
+        { schema = languageToolSchema @(LanguageTool es name desc handler)
+        , handler = flip invokeLanguageTool tool }
