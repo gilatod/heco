@@ -1,14 +1,18 @@
+{-# LANGUAGE DeriveAnyClass #-}
+
 module Heco.Data.Immanant.Memory where
 
+import Heco.Data.Aeson (AesonDefault(..))
 import Heco.Data.Entity (EntityId)
 import Heco.Data.Entity.TH (deriveEntity)
 import Heco.Data.TimePhase (ImmanantContent(..), AnyImmanantContent (AnyImmanantContent))
+import Heco.Data.Aeson (HasAesonOps)
 
 import Data.Time (UTCTime)
 import Data.Text (Text)
 import Data.Default (Default(..))
 import Data.Vector.Unboxing qualified as VU
-import Data.Typeable (Typeable, cast)
+import Data.Typeable (cast)
 
 import GHC.Generics (Generic)
 
@@ -17,7 +21,7 @@ data Memory = Memory
     , vector :: Maybe (VU.Vector Float)
     , content :: [Text]
     , time :: Maybe UTCTime }
-    deriving (Show, Generic)
+    deriving (Show, Generic, HasAesonOps)
 
 instance Default Memory where
     def = Memory

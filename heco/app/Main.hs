@@ -1,23 +1,13 @@
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
-{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DeriveAnyClass #-}
 module Main (main) where
 
 import Heco.Data.FunctionSchema
-    ( describe,
-      optional,
-      propArray,
-      propString,
-      ArrayItemSpec(ArrayItems),
-      ArraySpec(items),
-      DataSchema(ObjectSchema),
-      FunctionSchema(FunctionSchema),
-      ParametricSpec(spec),
-      Field,
-      FieldDesc,
+    ( FieldDesc,
       HasDataSchema(..),
-      RecordDefault )
+      RecordDefault, EnumDefaultDesc )
 import Heco.Data.Default ()
-import Heco.Data.Aeson (defaultAesonOps)
+import Heco.Data.Aeson (HasAesonOps, AesonDefault(..))
 import Heco.Data.AuthGroup (AuthGroup(..))
 import Heco.Data.Message (Message(..), newSystemMessage, newUserMessage)
 import Heco.Data.Embedding (Embedding(Embedding))
@@ -28,7 +18,6 @@ import Heco.Data.LanguageTool (LanguageTool(..), LanguageToolSpec(..), Param, Pa
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.LanguageToolError (LanguageToolError(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
-import Heco.Events.EgoEvent (EgoEvent(..))
 import Heco.Effectful.Exception (eitherThrowIO)
 import Heco.Effectful.Event (on, Event, runEvent)
 import Heco.Effectful.LanguageService (embed, chat, LanguageService(..), ChatOps(..))
@@ -75,10 +64,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
-import Data.Function ((&))
-import Data.HashMap.Strict qualified as HashMap
-import Data.Aeson qualified as Aeson
-import Data.Aeson.TH (deriveFromJSON)
+import Data.Aeson (FromJSON, ToJSON)
 
 import Control.Monad (when, forM_)
 import System.IO (stdout)
@@ -218,9 +204,7 @@ data TestEntity = TestEntity
     { id :: Maybe EntityId
     , vector :: Maybe (VU.Vector Float)
     , text :: Text }
-    deriving (Show, Generic)
-
-instance Default TestEntity
+    deriving (Show, Generic, Default, HasAesonOps)
 
 deriveEntity ''TestEntity
 
@@ -300,10 +284,19 @@ newHecoOps = do
 data Location = Location
     { name :: FieldDesc (Maybe Text) "Name of location, e.g. San Francisco, CA"
     , datetime :: FieldDesc (Maybe Text) "Date or time, e.g. today, tomorrow, 2023-06-29" }
-    deriving Generic
+    deriving (Generic, HasAesonOps)
+    deriving (FromJSON, ToJSON) via (AesonDefault Location)
     deriving HasDataSchema via (RecordDefault Location)
 
-deriveFromJSON defaultAesonOps ''Location
+data TestEnum
+    = A | B | C
+    deriving (Generic, Enum, Bounded, HasAesonOps)
+    deriving (FromJSON, ToJSON) via (AesonDefault TestEnum)
+    deriving HasDataSchema via
+        (EnumDefaultDesc TestEnum
+            [ "This is A"
+            , "This is B"
+            , "This is C" ])
 
 weatherTool :: LanguageTool es
     "get_weather"

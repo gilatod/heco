@@ -1,4 +1,4 @@
-# Changelog for `ae`
+# Changelog for `heco`
 
 All notable changes to this project will be documented in this file.
 

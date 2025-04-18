@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 module Heco.Effectful.LanguageService.OpenAI
     ( -- * Data types
       OpenAIOps(..)
@@ -9,8 +8,7 @@ module Heco.Effectful.LanguageService.OpenAI
     ) where
 
 import Heco.Network.HTTP.Client (Headers)
-import Heco.Data.FunctionSchema (FunctionSchema)
-import Heco.Data.FunctionSchema.JSON ()
+import Heco.Data.FunctionSchema (FunctionSchema(..))
 import Heco.Data.Aeson (defaultAesonOps)
 import Heco.Data.Model (ModelName(ModelName))
 import Heco.Data.Message (Message(..), ToolCall(..), ToolResponse(..), newAssistantMessage, messageUnique)
@@ -264,7 +262,7 @@ fromToolCallBuilder builder = ToolCall
     { id = TL.toStrict . TLB.toLazyText $ builder.id
     , name = TL.toStrict . TLB.toLazyText $ builder.name
     , arguments = parseToolCallArguments $ TLB.toLazyText builder.arguments }
-    
+ 
 fromCompleteOpenAIToolCall :: OpenAIToolCall -> ToolCall
 fromCompleteOpenAIToolCall toolCall =
     let OpenAIToolCall { id = id, function = f } = toolCall

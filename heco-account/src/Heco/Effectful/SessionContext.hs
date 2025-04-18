@@ -11,7 +11,7 @@ import Effectful.State.Static.Shared (evalState, stateM, modifyM)
 import Effectful.TH (makeEffect)
 
 import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
+import Data.HashMap.Strict qualified as HashMap
 import Control.Monad.Extra (whenJust)
 
 data SessionContext ctx :: Effect where

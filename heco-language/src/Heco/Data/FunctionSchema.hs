@@ -2,15 +2,29 @@
 
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE DerivingVia #-}
 
 module Heco.Data.FunctionSchema where
 
-import Heco.Data.Record (RecordFieldsEx(..), RecordFieldEx(..), recordFieldsEx)
+import Heco.Data.Aeson ((.=?), (.=.), (.=.?), HasAesonOps(aesonOps))
+import Heco.Data.Typelits (KnownSymbols (symbolValues))
+import Heco.Data.Record (RecordFieldsEx(..), FieldInfoEx(..), recordFieldsEx)
 
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TL
+
+import Data.Vector qualified as V
+import Data.Vector.Primitive qualified as VP
+import Data.Vector.Unboxing qualified as VU
+import Data.Vector.Storable qualified as VS
+
+import Data.Aeson (Key, FromJSON, ToJSON(..), Encoding, (.=), pairs, KeyValue(..))
+import Data.Aeson qualified as Aeson
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap (KeyMap)
+import Data.Aeson.Encoding (list)
+
 import Data.Default (Default (..))
 import Data.Time (UTCTime, LocalTime, DiffTime, TimeOfDay)
 import Data.UUID (UUID)
@@ -21,14 +35,9 @@ import Data.Ord (Down)
 import Data.IntSet (IntSet)
 import Data.List.NonEmpty (NonEmpty)
 import Data.HashSet (HashSet)
-import Data.Aeson (Key, FromJSON, ToJSON)
-import Data.Aeson.KeyMap (KeyMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Map.Strict qualified as Map
-import Data.Vector qualified as V
-import Data.Vector.Primitive qualified as VP
-import Data.Vector.Unboxing qualified as VU
-import Data.Vector.Storable qualified as VS
+
 import Data.String (IsString)
 import Data.Function ((&))
 import Data.Proxy (Proxy(..))
@@ -40,6 +49,7 @@ import Numeric.Natural (Natural)
 import Pattern.Cast (Cast(..))
 import GHC.Generics (Generic, Rep)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.Records (HasField(..))
 
 class ParametricSpec p s where
     spec :: p -> s
@@ -170,6 +180,110 @@ instance ParametricSpec [PropertySchema] ObjectSpec where
     spec props = ObjectSpec
         { properties = props
         , additionalProperties = Nothing }
+
+instance ToJSON FunctionSchema where
+    -- toJSON = fromJust . decode @Value . encodingToLazyByteString . encodeFunctionSchema
+    toJSON = undefined
+    toEncoding s = pairs $
+        "type" .= ("function" :: Text) <>
+        "function" .=. function
+        where
+            function = pairs $
+                "name" .= s.name <>
+                "description" .=? s.description <>
+                "parameters" .=. params
+            params = pairs $ "type" .= ("object" :: Text) <> encodeObjectSpecKV s.parameters
+
+instance ToJSON DataSchema where
+    toJSON = undefined
+    toEncoding = pairs . encodeDataSchemaKV
+
+encodeDataSchemaKV :: (KeyValue Encoding kv, Monoid kv) => DataSchema -> kv
+encodeDataSchemaKV = \case
+    StringSchema s -> doEncode "string" $ encodeStringSpecKV s
+    StringEnumSchema ss -> doEncode "string" $ encodeEnumSpecsKV ss
+    IntegerSchema s -> doEncode "integer" $ encodeNumberSpecKV s
+    IntegerEnumSchema ss -> doEncode "integer" $ encodeEnumSpecsKV ss
+    NumberSchema s -> doEncode "number" $ encodeNumberSpecKV s
+    NumberEnumSchema ss -> doEncode "number" $ encodeEnumSpecsKV ss
+    BoolSchema -> doEncode "boolean" mempty
+    ArraySchema s -> doEncode "array" $ encodeArraySpecKV s
+    ObjectSchema s -> doEncode "object" $ encodeObjectSpecKV s
+    NullSchema -> doEncode "null" mempty
+    where
+        doEncode (t :: Text) rest = "type" .= t <> rest
+
+encodeStringSpecKV :: (KeyValue Encoding kv, Monoid kv) => StringSpec -> kv
+encodeStringSpecKV s = mconcat
+    [ "minLength" .=? s.minLength
+    , "maxLength" .=? s.maxLength
+    , "pattern" .=? s.pattern
+    , "format" .=? (encodeStringFormat <$> s.format) ]
+
+encodeStringFormat :: StringFormat -> Text
+encodeStringFormat = \case
+    DateTimeFormat -> "date-time"
+    TimeFormat -> "time"
+    DateFormat -> "date"
+    DurationFormat -> "duration"
+    EmailFormat -> "email"
+    IPv4Format -> "ipv4"
+    IPv6Format -> "ipv6"
+    UUIDFormat -> "uuid"
+    URIFormat -> "uri"
+    PointerFormat -> "json-pointer"
+    RegexFormat -> "regex"
+
+encodeEnumSpecsKV :: (KeyValue Encoding kv, Monoid kv, ToJSON v) => [EnumOption v] -> kv
+encodeEnumSpecsKV opts = enums opts <> enumDescs opts
+    where
+        enums = ("enum" .=.) . list \s -> toEncoding s.value
+        enumDescs = ("enumDescriptions" .=.) . list \s ->
+            maybe "" toEncoding s.description
+    
+encodeNumberSpecKV ::
+    ( KeyValue Encoding kv, Monoid kv
+    , ToJSON n
+    , HasField "minimum" s (Maybe n)
+    , HasField "maximum" s (Maybe n)
+    , HasField "exclusiveMinimum" s Bool
+    , HasField "exclusiveMaximum" s Bool  )
+    => s -> kv
+encodeNumberSpecKV s = mconcat
+    [ "minimum" .=? s.minimum
+    , "maximum" .=? s.maximum
+    , "exclusiveMinimum" .= s.exclusiveMinimum
+    , "exclusiveMaximum"  .= s.exclusiveMaximum ]
+
+encodeArraySpecKV :: (KeyValue Encoding kv, Monoid kv) => ArraySpec -> kv
+encodeArraySpecKV s = mconcat
+    [ "items" .=. encodeArrayItemSpec s.items
+    , "additionalItems" .=.? (toEncoding <$> s.additionalItems)
+    , "minimumLength" .=? s.minimumLength
+    , "maximumLength" .=? s.maximumLength
+    , tryEncodeUniqueness s.items ]
+    where
+        encodeArrayItemSpec = \case
+            ArrayItems s -> toEncoding s
+            UniqueItems s -> toEncoding s
+            TupleItems ss -> list toEncoding ss
+        tryEncodeUniqueness = \case
+            UniqueItems _ -> "uniqueItems" .= True
+            _ -> mempty
+
+encodeObjectSpecKV :: (KeyValue Encoding kv, Monoid kv) => ObjectSpec -> kv
+encodeObjectSpecKV s = mconcat
+    [ "properties" .=. (pairs . mconcat . map encodePropertySchemaKV) s.properties
+    , "additionalProperties" .=.? (toEncoding <$> s.additionalProperties)
+    , "required" .= (map (\s -> s.name) . filter (\s -> not s.optional)) s.properties ]
+ 
+encodePropertySchemaKV :: KeyValue Encoding kv => PropertySchema -> kv
+encodePropertySchemaKV s = Key.fromText s.name .=. pairs inner
+    where
+        inner = "description" .=? s.description <> encodeDataSchemaKV s.schema
+
+encodePropertySchema :: PropertySchema -> Encoding
+encodePropertySchema = pairs . encodePropertySchemaKV
 
 property :: Text -> DataSchema -> PropertySchema
 property name schema = PropertySchema
@@ -322,6 +436,8 @@ instance (HasDataSchema a, HasDataSchema b, HasDataSchema c, HasDataSchema d, Ha
         TupleItems [dataSchema @a, dataSchema @b, dataSchema @c, dataSchema @d, dataSchema @e, dataSchema @g, dataSchema @h, dataSchema @i, dataSchema @j, dataSchema @k]
 
 newtype RecordDefault t = RecordDefault t
+newtype EnumDefault t = EnumDefault t
+newtype EnumDefaultDesc t (descs :: [Symbol]) = EnumDefaultDesc t
 
 newtype Field t = Field t
     deriving Generic
@@ -359,15 +475,37 @@ instance (HasDataSchema t, KnownSymbol desc) => IsProperField (FieldDesc t desc)
     fieldDataSchema = dataSchema @t
     fieldDesc = Just $ T.pack $ symbolVal (Proxy :: Proxy desc)
 
-instance (Generic t, RecordFieldsEx IsProperField (DataSchema, Maybe Text) (Rep t)) => HasDataSchema (RecordDefault t) where
+instance
+    ( Generic t, HasAesonOps t
+    , RecordFieldsEx IsProperField (DataSchema, Maybe Text) (Rep t) )
+    => HasDataSchema (RecordDefault t) where
     dataSchema = ObjectSchema ObjectSpec
         { properties =
-            let fields = recordFieldsEx @t @IsProperField \(Proxy :: Proxy f) -> (fieldDataSchema @f, fieldDesc @f)
+            let fields = recordFieldsEx @t @IsProperField \(_ :: Proxy f) -> (fieldDataSchema @f, fieldDesc @f)
             in fields & map \r ->
                 let (schema, desc) = r.extra
                 in PropertySchema
-                    { name = T.pack r.name
+                    { name = T.pack $ fieldLabelModifier $ r.name
                     , description = desc
                     , schema = schema
                     , optional = tyConName (typeRepTyCon r.typeRep) == "Maybe" }
         , additionalProperties = Nothing }
+        where
+            opts = aesonOps @t
+            fieldLabelModifier = opts.fieldLabelModifier
+
+instance (Enum t, Bounded t, ToJSON t) => HasDataSchema (EnumDefault t) where
+    dataSchema = StringEnumSchema $
+        ([minBound..maxBound] :: [t]) & map \v ->
+            EnumOption
+                { value = TL.toStrict $ TL.decodeUtf8 $ Aeson.encode v
+                , description = Nothing }
+
+instance (Enum t, Bounded t, ToJSON t, KnownSymbols descs)
+    => HasDataSchema (EnumDefaultDesc t descs) where
+    dataSchema :: (Enum t, Bounded t, ToJSON t) => DataSchema
+    dataSchema = StringEnumSchema $
+        zip ([minBound..maxBound] :: [t]) (symbolValues @descs) & map \(v, desc) ->
+            EnumOption
+                { value = TL.toStrict $ TL.decodeUtf8 $ Aeson.encode v
+                , description = Just $ T.pack desc }

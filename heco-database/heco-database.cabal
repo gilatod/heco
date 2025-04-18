@@ -2,9 +2,9 @@ cabal-version: 3.0
 
 name:           heco-database
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/sicusa/ae#readme>
-homepage:       https://github.com/sicusa/ae#readme
-bug-reports:    https://github.com/sicusa/ae/issues
+description:    Please see the README on GitHub at <https://github.com/sicusa/heco#readme>
+homepage:       https://github.com/sicusa/heco#readme
+bug-reports:    https://github.com/sicusa/heco/issues
 author:         Phlamcenth Sicusa
 maintainer:     sicusa@gilatod.art
 copyright:      2024 Phlamcenth Sicusa
@@ -14,7 +14,7 @@ build-type:     Simple
 
 source-repository head
   type: git
-  location: https://github.com/sicusa/ae
+  location: https://github.com/sicusa/heco
 
 common defaults
   default-extensions:
@@ -30,6 +30,7 @@ common defaults
     AllowAmbiguousTypes
     TemplateHaskell
     Strict
+    DerivingVia
   ghc-options:
     -Wall
     -Wno-name-shadowing

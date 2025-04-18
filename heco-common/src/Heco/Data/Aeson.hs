@@ -1,29 +1,59 @@
-{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module Heco.Data.Aeson where
 
-import Data.HashMap.Strict qualified as HashMap
-
 import Data.Aeson
-    ( Encoding,
-      Value(Array),
+    ( FromJSON(parseJSON),
       ToJSON(toJSON, toEncoding),
-      Options(..),
-      KeyValue(..),
+      Value(Array),
       parseIndexedJSON,
-      withArray )
+      withArray,
+      Encoding,
+      GFromJSON,
+      Zero,
+      Options(fieldLabelModifier, omitNothingFields),
+      GToJSON',
+      KeyValue(..), genericToEncoding, genericParseJSON )
 import Data.Aeson qualified as Aeson
-import Data.Aeson.Types (FromJSON(..), Parser, listEncoding)
 import Data.Aeson.Encoding (encodingToLazyByteString)
 
-import qualified Data.Vector as V
-import qualified Data.Vector.Unboxing as VU
-import qualified Data.Vector.Generic as VG
+import Data.Vector qualified as V
+import Data.Vector.Unboxing qualified as VU
+import Data.Vector.Generic qualified as VG
 
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
+import GHC.Generics (Generic (Rep))
+import Data.Aeson.Types (Parser, listEncoding)
+import Data.Aeson (genericToJSON)
+
+class HasAesonOps a where
+    aesonOps :: Aeson.Options
+    aesonOps = defaultAesonOps
+
+    aesonOpsNotOmitNull :: Aeson.Options
+    aesonOpsNotOmitNull = (aesonOps @a) { omitNothingFields = False }
+
+newtype AesonDefault t = AesonDefault t
+    deriving Generic
+
+instance
+    ( Generic a, HasAesonOps a
+    , GToJSON' Encoding Zero (Rep a)
+    , GToJSON' Value Zero (Rep a) )
+    => ToJSON (AesonDefault a) where
+    toJSON (AesonDefault a) = genericToJSON (aesonOps @a) a
+    toEncoding (AesonDefault a) = genericToEncoding (aesonOps @a) a
+
+instance
+    ( Generic a, HasAesonOps a
+    , GFromJSON Zero (Rep a) )
+    => FromJSON (AesonDefault a) where
+    parseJSON v = AesonDefault <$> genericParseJSON (aesonOps @a) v
 
 defaultAesonOps :: Aeson.Options
 defaultAesonOps = Aeson.defaultOptions
@@ -31,23 +61,6 @@ defaultAesonOps = Aeson.defaultOptions
     , fieldLabelModifier = \case
         ('_':rs) -> rs
         name -> name }
-
-defaultAesonOpsNotOmitNull :: Aeson.Options
-defaultAesonOpsNotOmitNull = Aeson.defaultOptions
-    { omitNothingFields = False
-    , fieldLabelModifier = \case
-        ('_':rs) -> rs
-        name -> name }
-
-aesonOps :: [(String, String)] -> Aeson.Options
-aesonOps pairs = Aeson.defaultOptions
-    { fieldLabelModifier = \case
-        ('_':rs) -> rs
-        name -> case HashMap.lookup name map of
-            Just key -> key
-            Nothing -> name }
-    where
-        map = HashMap.fromList pairs
 
 vectorParseJSON :: (FromJSON a, VG.Vector w a) => String -> Value -> Parser (w a)
 vectorParseJSON s = withArray s $ fmap V.convert . V.mapM (uncurry $ parseIndexedJSON parseJSON) . V.indexed

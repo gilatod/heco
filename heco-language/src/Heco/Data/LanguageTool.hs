@@ -34,7 +34,6 @@ type family LanguageHandler es f where
     LanguageHandler es (Param name t -> b) = t -> LanguageHandler es b
     LanguageHandler es (ParamDesc name t desc -> b) = t -> LanguageHandler es b
     LanguageHandler es (Ret r) = Eff es r
-    LanguageHandler es r = Eff es r
 
 newtype LanguageTool es (name :: Symbol) (desc :: Symbol) handler = LanguageTool (LanguageHandler es handler)
 

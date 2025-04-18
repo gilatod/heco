@@ -238,7 +238,9 @@ wrapInteraction ops env eff =
             trigger $ OnEgoInputMessagesGenerated messages
 
             tools <- getLanguageTools
-            msg <- doChat (ops.chatOps { tools = ops.chatOps.tools ++ tools }) messages
+            msg <- case ops.chatOps.tools of
+                [] -> doChat (ops.chatOps { tools = tools }) messages
+                ts -> doChat (ops.chatOps { tools = tools ++ ts }) messages
 
             trigger $ OnEgoInteractionCompleted msg
             
