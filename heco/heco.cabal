@@ -31,6 +31,7 @@ common defaults
     TemplateHaskell
     Strict
     DerivingVia
+    DeriveAnyClass
   ghc-options:
     -Wall
     -Wno-name-shadowing

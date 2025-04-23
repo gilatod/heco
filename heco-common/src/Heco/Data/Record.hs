@@ -34,7 +34,6 @@ recordFields = recordFieldsImpl @(Rep t)
 
 data FieldInfoEx ex = FieldInfoEx
     { name :: String
-    , typeRep :: TypeRep
     , extra :: ex }
 
 class RecordFieldsEx (c :: Type -> Constraint) ex rep where
@@ -46,11 +45,10 @@ instance RecordFieldsEx c ex f => RecordFieldsEx c ex (M1 D x f) where
 instance RecordFieldsEx c ex f => RecordFieldsEx c ex (M1 C x f) where
     recordFieldsExImpl = recordFieldsExImpl @c @ex @f
 
-instance (Selector s, Typeable t, c t) => RecordFieldsEx c ex (M1 S s (K1 R t)) where
+instance (Selector s, c t) => RecordFieldsEx c ex (M1 S s (K1 R t)) where
     recordFieldsExImpl f =
         [ FieldInfoEx
             { name = selName (undefined :: M1 S s (K1 R t) ())
-            , typeRep = typeRep (Proxy :: Proxy t)
             , extra = f (Proxy :: Proxy t) } ]
 
 instance (RecordFieldsEx c ex a, RecordFieldsEx c ex b) => RecordFieldsEx c ex (a :*: b) where

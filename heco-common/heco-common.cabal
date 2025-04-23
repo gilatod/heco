@@ -31,6 +31,7 @@ common defaults
     TemplateHaskell
     Strict
     DerivingVia
+    DeriveAnyClass
   ghc-options:
     -Wall
     -Wno-name-shadowing
@@ -64,6 +65,7 @@ library
   hs-source-dirs: src
   exposed-modules:
     Heco.Data.Aeson,
+    Heco.Data.Aeson.TH,
     Heco.Data.Record,
     Heco.Data.Default,
     Heco.Data.Unique,

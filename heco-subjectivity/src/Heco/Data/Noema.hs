@@ -9,7 +9,8 @@ import Data.Aeson.TH (deriveJSON)
 import Pattern.Cast (Cast(..))
 
 newtype NoemaId = NoemaId Int
-    deriving (Show, Eq, Hashable, Ord, Enum, Bounded)
+    deriving (Show, Eq, Ord, Enum, Bounded)
+    deriving newtype Hashable
 
 deriveJSON defaultOptions ''NoemaId
 

@@ -1,6 +1,3 @@
-{-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
-
 module Heco.Data.Entity where
 
 import Data.Aeson
@@ -26,7 +23,8 @@ import Heco.Data.Aeson (HasAesonOps(aesonOpsNotOmitNull))
 import GHC.Generics (Generic (..))
 
 newtype EntityId = EntityId Int
-    deriving (Show, Eq, Hashable, Ord, Enum, Bounded)
+    deriving (Show, Eq, Ord, Enum, Bounded)
+    deriving newtype Hashable
 
 instance VU.Unboxable EntityId where
     type Rep EntityId = Int

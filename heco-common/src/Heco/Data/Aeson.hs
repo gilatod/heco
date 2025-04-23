@@ -6,18 +6,22 @@
 module Heco.Data.Aeson where
 
 import Data.Aeson
-    ( FromJSON(parseJSON),
-      ToJSON(toJSON, toEncoding),
-      Value(Array),
+    ( genericParseJSON,
       parseIndexedJSON,
       withArray,
+      genericToEncoding,
+      genericToJSON,
       Encoding,
+      FromJSON(parseJSON),
       GFromJSON,
       Zero,
-      Options(fieldLabelModifier, omitNothingFields),
+      Options(omitNothingFields, fieldLabelModifier),
+      Value(Array),
       GToJSON',
-      KeyValue(..), genericToEncoding, genericParseJSON )
+      KeyValue(..),
+      ToJSON(toJSON, toEncoding) )
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Types (Parser, listEncoding)
 import Data.Aeson.Encoding (encodingToLazyByteString)
 
 import Data.Vector qualified as V
@@ -27,9 +31,8 @@ import Data.Vector.Generic qualified as VG
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TL
+
 import GHC.Generics (Generic (Rep))
-import Data.Aeson.Types (Parser, listEncoding)
-import Data.Aeson (genericToJSON)
 
 class HasAesonOps a where
     aesonOps :: Aeson.Options
@@ -39,7 +42,7 @@ class HasAesonOps a where
     aesonOpsNotOmitNull = (aesonOps @a) { omitNothingFields = False }
 
 newtype AesonDefault t = AesonDefault t
-    deriving Generic
+    deriving HasAesonOps via t
 
 instance
     ( Generic a, HasAesonOps a

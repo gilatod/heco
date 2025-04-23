@@ -146,7 +146,7 @@ languageToolSchema = FunctionSchema
     , description = Just $ symbolText @desc
     , parameters = ObjectSpec
         { properties = languageToolPropertySchemas @es @t
-        , additionalProperties = Nothing } }
+        , additionalProperties = Left False } }
 
 languageToolSchema_ :: forall t es name desc handler.
     ( t ~ LanguageTool es name desc handler

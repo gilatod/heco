@@ -7,7 +7,8 @@ import Data.Hashable (Hashable)
 import Pattern.Cast (Cast(..))
 
 newtype SessionToken = SessionToken Unique
-    deriving (Eq, Ord, Hashable)
+    deriving (Eq, Ord)
+    deriving newtype Hashable
 
 instance Show SessionToken where
     show (SessionToken u) = "SessionToken " ++ show (hashUnique u)

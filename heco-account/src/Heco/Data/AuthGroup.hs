@@ -8,7 +8,8 @@ import Data.Hashable (Hashable)
 import Data.String (IsString)
 
 newtype GroupName = GroupName Text
-    deriving (Eq, Show, Hashable, IsString)
+    deriving (Eq, Show)
+    deriving newtype (Hashable, IsString)
 
 data AuthGroup = AuthGroup
     { name :: GroupName

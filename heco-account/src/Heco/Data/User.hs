@@ -7,7 +7,8 @@ import Data.String (IsString)
 import Pattern.Cast (Cast(..))
 
 newtype Username = Username Text
-    deriving (Eq, Show, Hashable, IsString)
+    deriving (Eq, Show)
+    deriving newtype (Hashable, IsString)
 
 instance Cast Username Text where
     cast (Username t) = t

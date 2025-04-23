@@ -12,7 +12,8 @@ import Data.Hashable (Hashable)
 import Data.Foldable (for_)
 
 newtype EventListenerHandle = EventListenerHandle Int
-    deriving (Eq, Hashable)
+    deriving Eq
+    deriving newtype Hashable
 
 data Event e :: Effect where
     Listen :: (e -> m ()) -> Event e m EventListenerHandle

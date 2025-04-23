@@ -3,9 +3,7 @@
 module Main (main) where
 
 import Heco.Data.FunctionSchema
-    ( FieldDesc,
-      HasDataSchema(..),
-      RecordDefault, EnumDefaultDesc )
+    ( EnumDefaultDesc, FieldDesc, HasDataSchema, RecordDefault )
 import Heco.Data.Default ()
 import Heco.Data.Aeson (HasAesonOps, AesonDefault(..))
 import Heco.Data.AuthGroup (AuthGroup(..))
@@ -23,14 +21,14 @@ import Heco.Effectful.Event (on, Event, runEvent)
 import Heco.Effectful.LanguageService (embed, chat, LanguageService(..), ChatOps(..))
 import Heco.Effectful.AccountService (LoginOps(..), login, getUser, logout, AccountService)
 import Heco.Effectful.AccountService.Ldap
-    ( LdapOps(..),
-      Host(Tls),
-      Dn(Dn),
+    ( runLdapAccountServiceEx,
+      LdapGroupAttributes(member, LdapGroupAttributes, name),
+      LdapGroupMemberIdentification(GroupMemberIdentifiedByDn),
+      LdapOps(..),
+      LdapUserAttributes(email, LdapUserAttributes, username, nickname),
       Password(Password),
-      LdapUserAttributes(..),
-      LdapGroupAttributes(..),
-      LdapGroupMemberIdentification(..),
-      runLdapAccountServiceEx )
+      Dn(Dn),
+      Host(Tls) )
 import Heco.Effectful.PrivilegeService (runSimplePrivilegeService)
 import Heco.Effectful.SessionContext (getSessionContext, SessionContext)
 import Heco.Effectful.LanguageService (chatOps)
@@ -39,11 +37,12 @@ import Heco.Effectful.LanguageService.Ollama (OllamaOps(..), runOllamaLanguageSe
 import Heco.Effectful.LanguageToolProvider.Native (runNativeLanguageToolProviderEx)
 import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
 import Heco.Effectful.DatabaseService
-    ( SearchOps(..),
-      DatabaseService,
+    ( DatabaseService,
       addEntity,
       getEntities,
-      loadCollection, setEntity_ )
+      loadCollection,
+      setEntity_,
+      SearchOps(rangeFilter, limit, radius) )
 import Heco.Effectful.InternalTimeStream (InternalTimeStream, enrichUrimpression_)
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps (RingBufferOps, capacity), runRingBufferInternalTimeStreamEx)
 import Heco.Effectful.Ego (Ego, interactEgo)
@@ -204,7 +203,7 @@ data TestEntity = TestEntity
     { id :: Maybe EntityId
     , vector :: Maybe (VU.Vector Float)
     , text :: Text }
-    deriving (Show, Generic, Default, HasAesonOps)
+    deriving (Show, Generic, Default)
 
 deriveEntity ''TestEntity
 
@@ -284,14 +283,17 @@ newHecoOps = do
 data Location = Location
     { name :: FieldDesc (Maybe Text) "Name of location, e.g. San Francisco, CA"
     , datetime :: FieldDesc (Maybe Text) "Date or time, e.g. today, tomorrow, 2023-06-29" }
+    -- HasAesonOps 为 Location 提供 JSON 配置
     deriving (Generic, HasAesonOps)
+    -- 用 HasAesonOps 里指定的配置来实现 JSON 解码 / 编码
     deriving (FromJSON, ToJSON) via (AesonDefault Location)
+    -- 用 HasAesonOps 里指定的配置来实现 JSON Schema 自动创建
     deriving HasDataSchema via (RecordDefault Location)
 
 data TestEnum
     = A | B | C
-    deriving (Generic, Enum, Bounded, HasAesonOps)
-    deriving (FromJSON, ToJSON) via (AesonDefault TestEnum)
+    deriving (Generic, Show, Enum, Bounded)
+    deriving (HasAesonOps, FromJSON, ToJSON) via (AesonDefault TestEnum)
     deriving HasDataSchema via
         (EnumDefaultDesc TestEnum
             [ "This is A"

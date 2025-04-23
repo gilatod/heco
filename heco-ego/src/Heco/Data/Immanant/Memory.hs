@@ -2,11 +2,9 @@
 
 module Heco.Data.Immanant.Memory where
 
-import Heco.Data.Aeson (AesonDefault(..))
 import Heco.Data.Entity (EntityId)
 import Heco.Data.Entity.TH (deriveEntity)
 import Heco.Data.TimePhase (ImmanantContent(..), AnyImmanantContent (AnyImmanantContent))
-import Heco.Data.Aeson (HasAesonOps)
 
 import Data.Time (UTCTime)
 import Data.Text (Text)
@@ -21,7 +19,7 @@ data Memory = Memory
     , vector :: Maybe (VU.Vector Float)
     , content :: [Text]
     , time :: Maybe UTCTime }
-    deriving (Show, Generic, HasAesonOps)
+    deriving (Show, Generic)
 
 instance Default Memory where
     def = Memory

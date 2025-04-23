@@ -6,7 +6,8 @@ import Data.Hashable (Hashable)
 import Pattern.Cast (Cast(..))
 
 newtype ModelName = ModelName Text
-    deriving (Show, Eq, Hashable, IsString)
+    deriving (Show, Eq)
+    deriving newtype (Hashable, IsString)
 
 instance Cast ModelName Text where
     cast (ModelName t) = t

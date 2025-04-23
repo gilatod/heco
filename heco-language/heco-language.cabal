@@ -31,6 +31,7 @@ common defaults
     TemplateHaskell
     Strict
     DerivingVia
+    DeriveAnyClass
   ghc-options:
     -Wall
     -Wno-name-shadowing
@@ -85,6 +86,7 @@ library
     http-client,
     http-client-tls,
     http-conduit,
+    scientific,
     lrucache,
     conduit,
     uuid,
