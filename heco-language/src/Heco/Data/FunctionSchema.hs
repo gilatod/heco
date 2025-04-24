@@ -85,6 +85,7 @@ data DataSchema
     | AnyOfSchema [DataSchema]
     | OneOfSchema [DataSchema]
     | NotSchema DataSchema
+    | UnknownSchema Aeson.Object
     deriving (Show, Eq)
 
 data StringSpec = StringSpec
@@ -114,7 +115,8 @@ data StringFormat
     | URIFormat
     | PointerFormat
     | RegexFormat
-    deriving (Show, Eq, Enum, Bounded)
+    | UnknownFormat Text
+    deriving (Show, Eq)
 
 data EnumOption t = EnumOption
     { value :: t
@@ -239,6 +241,7 @@ encodeDataSchemaKV = \case
     AnyOfSchema ss -> "anyOf" .=. list toEncoding ss
     OneOfSchema ss -> "oneOf" .=. list toEncoding ss
     NotSchema s -> "not" .= s
+    UnknownSchema s -> mconcat $ map (uncurry (.=)) $ KeyMap.toList s
     where
         withType (t :: Text) rest = "type" .= t <> rest
 
@@ -263,6 +266,7 @@ encodeStringFormat = \case
     URIFormat -> "uri"
     PointerFormat -> "json-pointer"
     RegexFormat -> "regex"
+    UnknownFormat format -> format
 
 encodeEnumSpecsKV :: (KeyValue Encoding kv, Monoid kv, ToJSON v) => [EnumOption v] -> kv
 encodeEnumSpecsKV opts = enums opts <> enumDescs opts
@@ -280,7 +284,7 @@ encodeNumberSpecKV ::
     , HasField "minimum" s (Maybe n)
     , HasField "maximum" s (Maybe n)
     , HasField "exclusiveMinimum" s Bool
-    , HasField "exclusiveMaximum" s Bool  )
+    , HasField "exclusiveMaximum" s Bool )
     => s -> kv
 encodeNumberSpecKV s = mconcat
     [ "minimum" .=? s.minimum
@@ -442,7 +446,7 @@ parseSimpleDataSchema v = do
                 , maximumLength = maximumLength }
         "object" -> ObjectSchema <$> parseObjectSpec v
         "null" -> pure NullSchema
-        _ -> fail "Invalid data type"
+        _ -> pure $ UnknownSchema v
 
 instance FromJSON StringFormat where
     parseJSON = Aeson.withText "StringFormat" $ \case
@@ -458,7 +462,7 @@ instance FromJSON StringFormat where
         "uri" -> pure URIFormat
         "json-pointer" -> pure PointerFormat
         "regex" -> pure RegexFormat
-        _ -> fail "Invalid string format"
+        otherwise -> pure $ UnknownFormat otherwise
 
 instance FromJSON ObjectSpec where
     parseJSON = Aeson.withObject "Object" parseObjectSpec
