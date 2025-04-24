@@ -506,36 +506,6 @@ optional s = s { optional = True }
 describe :: Text -> PropertySchema -> PropertySchema
 describe t s = s { description = Just t }
 
-propString :: Text -> StringSpec -> PropertySchema
-propString name spec = property name $ StringSchema spec
-
-propStringEnum :: Text -> [EnumOption Text] -> PropertySchema
-propStringEnum name opts = property name $ StringEnumSchema opts
-
-propInteger :: Text -> IntegerSpec -> PropertySchema
-propInteger name spec = property name $ IntegerSchema spec
-
-propIntegerEnum :: Text -> [EnumOption Int] -> PropertySchema
-propIntegerEnum name opts = property name $ IntegerEnumSchema opts
-
-propNumber :: Text -> NumberSpec -> PropertySchema
-propNumber name spec = property name $ NumberSchema spec
-
-propNumberEnum :: Text -> [EnumOption Float] -> PropertySchema
-propNumberEnum name opts = property name $ NumberEnumSchema opts
-
-propBool :: Text -> PropertySchema
-propBool name = property name BoolSchema
-
-propArray :: Text -> ArraySpec -> PropertySchema
-propArray name spec = property name $ ArraySchema spec
-
-propObject :: Text -> ObjectSpec -> PropertySchema
-propObject name spec = property name $ ObjectSchema spec
-
-propNull :: Text -> PropertySchema
-propNull name = property name NullSchema
-
 class HasDataSchema t where
     dataSchema :: DataSchema
 
