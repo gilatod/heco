@@ -19,6 +19,11 @@ import Data.Vector.Primitive qualified as VP
 import Data.Vector.Unboxing qualified as VU
 import Data.Vector.Storable qualified as VS
 
+import Data.HashSet (HashSet)
+import Data.HashSet qualified as HashSet
+import Data.HashMap.Strict qualified as HashMap
+import Data.Map.Strict qualified as Map
+
 import Data.Aeson (Key, FromJSON, ToJSON(..), Encoding, (.=), pairs, KeyValue(..), (.:), (.:?))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as Aeson
@@ -36,10 +41,6 @@ import Data.Functor.Identity (Identity)
 import Data.Ord (Down)
 import Data.IntSet (IntSet)
 import Data.List.NonEmpty (NonEmpty)
-import Data.HashSet (HashSet)
-import Data.HashSet qualified as HashSet
-import Data.HashMap.Strict qualified as HashMap
-import Data.Map.Strict qualified as Map
 
 import Data.String (IsString)
 import Data.Function ((&))
@@ -48,6 +49,7 @@ import Data.Maybe (fromMaybe)
 import Data.Typeable (typeRepTyCon, tyConName, TypeRep, typeRep, Typeable)
 import Data.Scientific (toRealFloat, toBoundedInteger)
 import Control.Arrow ((>>>))
+import Control.Monad.Extra (firstJustM)
 
 import Network.URI (URI)
 
@@ -56,7 +58,6 @@ import Pattern.Cast (Cast(..))
 import GHC.Generics (Generic, Rep)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import GHC.Records (HasField(..))
-import Control.Monad.Extra (firstJustM)
 
 class ParametricSpec p s where
     spec :: p -> s
