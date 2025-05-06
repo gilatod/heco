@@ -19,7 +19,7 @@ data Memory = Memory
     , vector :: Maybe (VU.Vector Float)
     , content :: [Text]
     , time :: Maybe UTCTime }
-    deriving (Show, Generic)
+    deriving (Eq, Show, Generic)
 
 instance Default Memory where
     def = Memory

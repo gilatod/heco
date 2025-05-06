@@ -1,6 +1,6 @@
 cabal-version: 3.0
 
-name:           heco-ego
+name:           heco-portal-shell
 version:        0.1.0.0
 description:    Please see the README on GitHub at <https://github.com/sicusa/heco#readme>
 homepage:       https://github.com/sicusa/heco#readme
@@ -64,21 +64,12 @@ library
   default-language: GHC2024
   hs-source-dirs: src
   exposed-modules:
-    Heco.Data.Immanant.Memory,
-    Heco.Data.Immanant.Terminal,
-    Heco.Data.EgoError,
-    Heco.Events.EgoEvent,
-    Heco.Effectful.Ego,
-    Heco.Effectful.Ego.Heco
+    Heco.Data.Portal.Shell
   build-depends:
     heco-common,
     heco-event,
-    heco-account,
     heco-language,
-    heco-database,
     heco-subjectivity,
-    text-time,
-    lrucache,
-    conduit,
-    xml-types,
-    xml-conduit
+    heco-ego,
+    heco-portal,
+    conduit

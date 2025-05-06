@@ -1,7 +1,7 @@
 module Heco.Effectful.Event where
 
-import Effectful (Effect, Eff, (:>))
-import Effectful.Dispatch.Dynamic (reinterpret, localSeqUnlift, HasCallStack)
+import Effectful (Effect, Eff, (:>), UnliftStrategy (ConcUnlift), Persistence (Persistent), Limit (Unlimited))
+import Effectful.Dispatch.Dynamic (reinterpret, localSeqUnlift, HasCallStack, localUnlift)
 import Effectful.State.Static.Shared (evalState, state, get, modify, State)
 import Effectful.TH (makeEffect)
 import Effectful.Exception (bracket)
@@ -31,13 +31,18 @@ on :: forall e es a.
     => Eff es a -> (e -> Eff es ()) -> Eff es a
 on e f = bracket (listen f) (unlisten @e) (const e)
 
+withEvent :: forall e es a.
+    (HasCallStack, Event e :> es)
+    => (e -> Eff es ()) -> Eff es a -> Eff es a
+withEvent = flip on
+
 data EventState e es = EventState
     (HashMap EventListenerHandle (e -> Eff (State (EventState e es) : es) ())) Int
 
 runEvent :: forall e es a.
     HasCallStack => Eff (Event e : es) a -> Eff es a
 runEvent = reinterpret (evalState emptyState) \env -> \case
-    Listen listener -> localSeqUnlift env \unlift ->
+    Listen listener -> localUnlift env (ConcUnlift Persistent Unlimited) \unlift ->
         state \(EventState map acc) ->
             let handle = EventListenerHandle $ acc + 1
                 map' = HashMap.insert handle (unlift . listener) map

@@ -36,14 +36,14 @@ data ToolResponse = ToolResponse
     { id :: Text
     , name :: Text
     , content :: Value }
-    deriving Show
+    deriving (Eq, Show)
 
 data Message
     = SystemMessage Unique Text
     | UserMessage Unique Text
     | ToolMessage Unique ToolResponse
     | AssistantMessage Unique Text [ToolCall]
-    deriving (Show)
+    deriving (Eq, Show)
 
 newSystemMessage :: IOE :> es => Text -> Eff es Message
 newSystemMessage prompt = do

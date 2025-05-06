@@ -10,32 +10,32 @@ import Data.Vector (Vector)
 import Data.Vector qualified as V
 
 data InternalTimeStream :: Effect where
-    ProgressUrimpression :: InternalTimeStream m TimePhase
-    EnrichUrimpression :: Vector AnyImmanantContent -> InternalTimeStream m TimePhase
-    GetUrimpression :: InternalTimeStream m TimePhase
+    ProgressPresent :: InternalTimeStream m TimePhase
+    Present :: Vector AnyImmanantContent -> InternalTimeStream m TimePhase
+    GetPresent :: InternalTimeStream m TimePhase
     GetRetention :: InternalTimeStream m (Vector TimePhase)
     GetRetentionLength :: InternalTimeStream m Int
     GetRetentionCapacity :: InternalTimeStream m Int
 
 makeEffect ''InternalTimeStream
 
-progressUrimpression_ ::
+progressPresent_ ::
     (HasCallStack, InternalTimeStream :> es) => Eff es ()
-progressUrimpression_ = progressUrimpression >> pure ()
+progressPresent_ = progressPresent >> pure ()
 
-enrichUrimpression_ ::
+present_ ::
     (HasCallStack, InternalTimeStream :> es)
     => Vector AnyImmanantContent -> Eff es ()
-enrichUrimpression_ contents = enrichUrimpression contents >> pure ()
+present_ contents = present contents >> pure ()
 
-enrichUrimpressionSingle ::
+presentOne ::
     (HasCallStack, InternalTimeStream :> es, ImmanantContent c)
     => c -> Eff es TimePhase
-enrichUrimpressionSingle content =
-    enrichUrimpression $ V.singleton $ AnyImmanantContent content
+presentOne content =
+    present $ V.singleton $ AnyImmanantContent content
 
-enrichUrimpressionSingle_ ::
+presentOne_ ::
     (HasCallStack, InternalTimeStream :> es, ImmanantContent c)
     => c -> Eff es ()
-enrichUrimpressionSingle_ content =
-    enrichUrimpressionSingle content >> pure ()
+presentOne_ content =
+    presentOne content >> pure ()

@@ -1,33 +1,35 @@
 module Heco.Data.Immanant.Terminal where
 
 import Heco.Data.TimePhase (ImmanantContent(..))
-import Heco.Data.Message (Message, messageText, ToolResponse(..))
+import Heco.Data.Message (Message, messageText)
 
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TLB
 import Data.Text.Lazy.Builder.Int qualified as TLB
-import Data.Aeson.Text qualified as Aeson
+import Data.Hashable (Hashable)
+import Pattern.Cast (Cast(cast))
+
+newtype TerminalId = TerminalId Int
+    deriving (Show, Eq, Ord, Enum, Bounded)
+    deriving Num via Int
+    deriving newtype Hashable
+
+instance Cast TerminalId Int where
+    cast (TerminalId id) = id
 
 data Terminal
-    = TerminalChat Int Text
-    | TerminalReply Int Message
-    | TerminalToolResponse ToolResponse
-    | TerminalClose Int
-    
+    = TerminalChat TerminalId Text
+    | TerminalReply Message
+    deriving (Eq, Show)
+
 instance ImmanantContent Terminal where
     encodeImmanantContent = \case
         TerminalChat _ c -> ["chat", c]
-        TerminalReply _ c -> ["reply", messageText c]
-        TerminalToolResponse r ->
-            let content = TL.toStrict $ Aeson.encodeToLazyText r.content
-            in ["tool_response", r.name, content]
-        TerminalClose _ -> ["close"]
+        TerminalReply msg -> ["reply", messageText msg]
     getImmanantContentAttributes = \case
         TerminalChat id _ -> [sessionAttr id]
-        TerminalReply id _ -> [sessionAttr id]
-        TerminalToolResponse _ -> []
-        TerminalClose id -> [sessionAttr id]
+        _ -> []
         where
             sessionAttr id = ("session", numToText id)
-            numToText = TL.toStrict . TLB.toLazyText . TLB.decimal
+            numToText = TL.toStrict . TLB.toLazyText . TLB.decimal . cast @TerminalId @Int

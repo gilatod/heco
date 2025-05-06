@@ -75,6 +75,7 @@ library
     Heco.Events.LanguageEvent,
     Heco.Effectful.LanguageToolProvider,
     Heco.Effectful.LanguageToolProvider.Native,
+    Heco.Effectful.LanguageToolProvider.MCP,
     Heco.Effectful.LanguageService,
     Heco.Effectful.LanguageService.Common,
     Heco.Effectful.LanguageService.Ollama,

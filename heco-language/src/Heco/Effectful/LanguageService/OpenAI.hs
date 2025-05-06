@@ -26,6 +26,7 @@ import Effectful (Eff, (:>), IOE, MonadIO (liftIO), runEff)
 import Effectful.Dispatch.Dynamic (reinterpret)
 import Effectful.Error.Dynamic (Error, HasCallStack, throwError, runError, CallStack)
 import Effectful.Reader.Static (ask, Reader)
+import Effectful.State.Static.Local (evalState, State, state, modify)
 
 import Network.HTTP.Client
     ( withResponse,
@@ -73,7 +74,6 @@ import Control.Exception (throw)
 import Control.Monad.Extra (when, whenJust)
 import GHC.Records (HasField)
 import Pattern.Cast (cast)
-import Effectful.State.Static.Local (evalState, State, state, modify)
 
 data OpenAIOps = OpenAIOps
     { url :: Text

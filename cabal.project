@@ -9,6 +9,8 @@ packages:
   heco-event
   heco-language
   heco-subjectivity
+  heco-portal
+  heco-portal-shell
 
 allow-newer:
   base

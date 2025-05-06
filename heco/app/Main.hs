@@ -17,8 +17,9 @@ import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Data.LanguageTool (LanguageTool(..), LanguageToolSpec(..), Param, ParamDesc, Ret)
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.LanguageToolError (LanguageToolError(..))
+import Heco.Data.Portal.Shell (shellPortal)
 import Heco.Events.LanguageEvent (LanguageEvent(..))
-import Heco.Effectful.Exception (eitherThrowIO)
+import Heco.Effectful.Exception (runThrowEither)
 import Heco.Effectful.Event (on, Event, runEvent)
 import Heco.Effectful.LanguageService (embed, chat, LanguageService(..), ChatOps(..))
 import Heco.Effectful.AccountService (LoginOps(..), login, getUser, logout, AccountService)
@@ -45,14 +46,15 @@ import Heco.Effectful.DatabaseService
       loadCollection,
       setEntity_,
       SearchOps(rangeFilter, limit, radius) )
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, enrichUrimpression_)
+import Heco.Effectful.InternalTimeStream (InternalTimeStream, present_)
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps (RingBufferOps, capacity), runRingBufferInternalTimeStreamEx)
 import Heco.Effectful.Ego (Ego, interactEgo)
 import Heco.Effectful.Ego.Heco (runHecoEgoEx, HecoOps(..), immanantContentXMLFormatter, hecoMemoryOps, HecoMemoryOps(..))
+import Heco.Effectful.PortalService (runStandardPortalService, runPortal)
 
 import Effectful (runEff, liftIO, Eff, IOE, (:>))
 import Effectful.Fail (runFailIO)
-import Effectful.Concurrent (runConcurrent)
+import Effectful.Concurrent (runConcurrent, threadDelay)
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, send)
 import Effectful.State.Static.Local (evalState, get, put)
 import Effectful.Error.Dynamic (CallStack, Error, runError)
@@ -67,7 +69,7 @@ import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
 import Data.Aeson (FromJSON, ToJSON)
 
-import Control.Monad (when, forM_)
+import Control.Monad (when, forM_, forever)
 import System.IO (stdout)
 import GHC.IO.Handle (hFlush)
 import GHC.Generics (Generic)
@@ -262,7 +264,7 @@ testHeco = doChat
             liftIO $ putStr "> " >> hFlush stdout
             input <- liftIO $ getLine
             interactEgo do
-                enrichUrimpression_ $ V.fromList
+                present_ $ V.fromList
                     [ cast $ TerminalChat 1 $ "User: " <> T.pack input ]
             doChat
 
@@ -325,18 +327,21 @@ main = do
     openaiOps <- newOpenAIOps
     let run = runEff . runFailIO . runConcurrent
             . runSimplePrivilegeService groups
-            . eitherThrowIO . runCombinedLanguageService openaiOps ollamaOps
-            . eitherThrowIO . runLdapAccountServiceEx ldapOps
-            . eitherThrowIO . runMilvusDatabaseServiceEx milvusOps
-            . eitherThrowIO . runRingBufferInternalTimeStreamEx RingBufferOps { capacity = 20 }
-            . eitherThrowIO . runNativeLanguageToolProviderEx languageTools
-            . eitherThrowIO . runHecoEgoEx hecoOps
+            . runThrowEither . runCombinedLanguageService openaiOps ollamaOps
+            . runThrowEither . runLdapAccountServiceEx ldapOps
+            . runThrowEither . runMilvusDatabaseServiceEx milvusOps
+            . runThrowEither . runRingBufferInternalTimeStreamEx RingBufferOps { capacity = 20 }
+            . runThrowEither . runNativeLanguageToolProviderEx languageTools
+            . runThrowEither . runHecoEgoEx hecoOps
+            . runStandardPortalService
     _ <- run do
         -- embed "bge-m3" "介绍一下新艾利都" >>= liftIO . putStrLn . show
         -- content <- liftIO $ readFile "test.csv"
         -- let lineVec = V.fromList $ lines content
         --     contents = V.map (cast . StatementAction . T.pack) lineVec
-        -- enrichUrimpression_ contents
+        -- present_ contents
         -- testChat
-        testHeco
+        -- testHeco
+        _ <- runPortal shellPortal
+        forever $ threadDelay maxBound
     pure ()

@@ -10,6 +10,7 @@ import Pattern.Cast (Cast(..))
 
 newtype NoemaId = NoemaId Int
     deriving (Show, Eq, Ord, Enum, Bounded)
+    deriving Num via Int
     deriving newtype Hashable
 
 deriveJSON defaultOptions ''NoemaId

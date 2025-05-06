@@ -73,8 +73,9 @@ executable heco
     heco-database,
     heco-subjectivity,
     heco-ego,
-    http-client,
-    http-client-tls
+    heco-portal,
+    heco-portal-shell,
+    xml-conduit
 
 test-suite heco-tests
   import: defaults

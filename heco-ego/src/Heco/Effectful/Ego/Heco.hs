@@ -8,7 +8,7 @@ import Heco.Data.Embedding (Embedding(..))
 import Heco.Data.TimePhase
     ( TimePhase(..),
       ImmanantContent(..),
-      AnyImmanantContent (AnyImmanantContent),
+      AnyImmanantContent(AnyImmanantContent),
       joinImmanantContent )
 import Heco.Data.Immanant.Memory (Memory(..), anyImmanantContentToMemory)
 import Heco.Data.Immanant.Terminal (Terminal(..))
@@ -30,18 +30,20 @@ import Heco.Effectful.LanguageService
 import Heco.Effectful.LanguageToolProvider (LanguageToolProvider, invokeLanguageTool, getLanguageTools)
 import Heco.Effectful.InternalTimeStream
     ( InternalTimeStream,
-      enrichUrimpression_,
+      present_,
       getRetention,
-      getUrimpression,
-      progressUrimpression_, enrichUrimpressionSingle_ )
+      getPresent,
+      progressPresent_, presentOne_ )
 import Heco.Effectful.Ego (Ego(..))
 
 import Effectful (Eff, (:>), MonadIO (liftIO), IOE)
-import Effectful.Dispatch.Dynamic (localSeqUnlift, HasCallStack, LocalEnv, reinterpret)
+import Effectful.Dispatch.Dynamic (localSeqUnlift, HasCallStack, reinterpret)
 import Effectful.State.Static.Shared (State, modify, state, evalState)
 import Effectful.Reader.Static (runReader, Reader, ask)
 import Effectful.Error.Dynamic (Error, throwError, runError, CallStack, catchError)
 import Effectful.Exception (finally, catch, Exception(displayException), SomeException)
+import Effectful.Concurrent (Concurrent)
+import Effectful.Concurrent.QSem (QSem, waitQSem, signalQSem, newQSem)
 
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -150,13 +152,11 @@ timePhaseToMessasge ops (TimePhase unique contents) = do
     cache <- state $ swap . LRU.lookup unique
     case cache of
         Nothing -> do
-            msg <- case V.length contents of
-                0 -> newUserMessage ""
-                1 -> case Typeable.cast $ contents V.! 0 of
-                    Just (TerminalReply _ msg) -> pure msg
-                    Just (TerminalToolResponse r) -> newToolMessage r
+            msg <- if V.length contents == 0
+                then newUserMessage ""
+                else case Typeable.cast $ contents V.! 0 of
+                    Just (TerminalReply msg) -> pure msg
                     _ -> createUserMsg contents
-                _ -> createUserMsg contents
             modify $ LRU.insert unique msg
             pure msg
         Just msg -> pure msg
@@ -173,7 +173,7 @@ associateMemory ::
     , InternalTimeStream :> es )
     => HecoOps -> Eff es (Vector AnyImmanantContent)
 associateMemory ops = do
-    TimePhase _ contents <- getUrimpression
+    TimePhase _ contents <- getPresent
     if V.length contents == 0
         then pure mempty
         else do
@@ -194,36 +194,38 @@ injectMemory ::
     , LanguageService :> es
     , InternalTimeStream :> es )
     => HecoOps -> Eff es ()
-injectMemory ops = associateMemory ops >>= enrichUrimpression_
+injectMemory ops = associateMemory ops >>= present_
 
 wrapInteraction ::
     ( HasCallStack
     , IOE :> es
+    , Concurrent :> es
     , DatabaseService :> es
     , LanguageService :> es
     , LanguageToolProvider :> es
     , InternalTimeStream :> es
     , State (LRU Unique Message) :> es
     , Reader Message :> es
+    , Reader QSem :> es
     , Event EgoEvent :> es
     , Error LanguageError :> es
     , Error EgoError :> es )
-    => HecoOps -> LocalEnv localEs es -> Eff localEs a -> Eff es a
-wrapInteraction ops env eff = 
+    => HecoOps -> Eff es a -> Eff es a
+wrapInteraction ops eff = 
     startInteraction
-        >> localSeqUnlift env \unlift ->
-            finally (unlift eff) finalizeInteraction
+        >> finally eff finalizeInteraction
     where
         startInteraction = do
-            progressUrimpression_
-            trigger $ OnEgoInteractionStarted
+            ask @QSem >>= waitQSem
+            progressPresent_
+            trigger OnEgoInteractionStarted
 
         finalizeInteraction = do
             injectMemory ops
 
-            initialPrompt <- ask
+            initialPrompt <- ask @Message
             retention <- getRetention
-            urimpression <- getUrimpression
+            urimpression <- getPresent
             retentionMessages <- traverse (timePhaseToMessasge ops) retention
             urimpressionMessage <- timePhaseToMessasge ops urimpression
 
@@ -243,7 +245,8 @@ wrapInteraction ops env eff =
                 ts -> doChat (ops.chatOps { tools = tools ++ ts }) messages
 
             trigger $ OnEgoInteractionCompleted msg
-            
+            ask @QSem >>= signalQSem
+
         doChat chatOps messages = do
             res <- (Right <$> chat chatOps messages)
                 `catchError` (\_ (e :: LanguageError) -> pure $ Left e)
@@ -253,11 +256,11 @@ wrapInteraction ops env eff =
                     liftIO $ putStrLn "Error found, retrying..."
                     doChat chatOps messages
                 Right msg -> do
-                    progressUrimpression_
-                    enrichUrimpressionSingle_ $ TerminalReply 0 msg
-                    progressUrimpression_
+                    progressPresent_
+                    presentOne_ $ TerminalReply msg
+                    progressPresent_
                     handleReceivedMsg chatOps messages msg
-        
+
         handleReceivedMsg chatOps messages = \case
             msg@(AssistantMessage _ _ []) -> pure msg
 
@@ -268,11 +271,13 @@ wrapInteraction ops env eff =
                             { id = t.id
                             , name = t.name
                             , content = result }
-                    progressUrimpression_
-                    enrichUrimpressionSingle_ $ TerminalToolResponse resp
-                    newToolMessage resp
+                    trigger $ OnEgoToolUsed t resp
+                    progressPresent_
+                    toolMsg <- newToolMessage resp
+                    presentOne_ $ TerminalReply toolMsg
+                    pure toolMsg
 
-                progressUrimpression_
+                progressPresent_
                 doChat chatOps $ messages <> V.fromList respMsgs
 
             msg -> throwError $ UnhandledEgoError $
@@ -281,6 +286,7 @@ wrapInteraction ops env eff =
 runHecoEgo :: forall es a.
     ( HasCallStack
     , IOE :> es
+    , Concurrent :> es
     , DatabaseService :> es
     , LanguageService :> es
     , LanguageToolProvider :> es
@@ -291,24 +297,27 @@ runHecoEgo :: forall es a.
     , Error LanguageError :> es )
     => HecoOps -> Eff (Ego : es) a -> Eff es a
 runHecoEgo ops = reinterpret wrap \env -> \case
-    InteractEgo eff -> wrapInteraction ops env eff
+    InteractEgo eff ->
+        localSeqUnlift env \unlift ->
+            wrapInteraction ops (unlift eff)
         `on` \case
             OnTimePhaseLost (TimePhase _ contents) ->
                 memorizeImmanantContents ops contents
             _ -> pure ()
         `catch` \(e :: SomeException) ->
             (throwError . UnhandledEgoError $ displayException e)
-
-    InjectMemory -> injectMemory ops
     where
         wrap e = do
             initialPrompt <- newSystemMessage $ ops.characterPrompt <> "\n\n" <> ops.taskPrompt
+            qsem <- newQSem 1
             e & evalState (LRU.newLRU @Unique @Message $ toInteger <$> ops.messageCacheLimit)
+                . runReader qsem
                 . runReader initialPrompt
 
 runHecoEgoEx ::
     ( HasCallStack
     , IOE :> es
+    , Concurrent :> es
     , DatabaseService :> es
     , LanguageService :> es
     , LanguageToolProvider :> es

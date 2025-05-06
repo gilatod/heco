@@ -2,11 +2,10 @@ module Heco.Effectful.PrivilegeService where
 
 import Heco.Data.AuthGroup (AuthGroup(..), GroupName)
 
-import Effectful ( Effect, Eff )
-import Effectful.TH ( makeEffect )
-import Effectful.Dispatch.Dynamic ( reinterpret )
-import Effectful.State.Static.Shared
-    ( evalState, get, modify, state )
+import Effectful (Effect, Eff)
+import Effectful.TH (makeEffect)
+import Effectful.Dispatch.Dynamic (reinterpret)
+import Effectful.State.Static.Shared (evalState, get, modify, state)
 
 data PrivilegeService :: Effect where
     GetAuthGroups :: PrivilegeService m [AuthGroup]

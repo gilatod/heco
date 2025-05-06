@@ -35,7 +35,7 @@ runRingBufferInternalTimeStream ::
     -> Eff (InternalTimeStream : es) a
     -> Eff es a
 runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
-    ProgressUrimpression -> do
+    ProgressPresent -> do
         state <- ask @ServiceState
 
         let urimpression = state.urimpression
@@ -56,14 +56,14 @@ runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
             pure (timePhase, uri)
         `catchIO` (\e -> throwError . UnhandledInternalTimeStreamError $ displayException e)
 
-    EnrichUrimpression newContents -> do
+    Present newContents -> do
         state <- ask @ServiceState
         modifyMVar state.urimpression \(TimePhase uuid contents) -> do
             let enriched = TimePhase uuid $ newContents <> contents
             trigger $ OnTimePhaseEnriched enriched newContents
             pure (enriched, enriched)
 
-    GetUrimpression -> do
+    GetPresent -> do
         state <- ask @ServiceState
         readMVar state.urimpression
 

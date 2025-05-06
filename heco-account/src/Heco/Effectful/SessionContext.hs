@@ -3,7 +3,7 @@ module Heco.Effectful.SessionContext where
 import Heco.Data.Session (SessionToken, Session(..))
 import Heco.Events.AccountEvent (AccountEvent(..))
 import Heco.Effectful.AccountService (AccountService, getSession)
-import Heco.Effectful.Event (Event, listen_)
+import Heco.Effectful.Event (Event, withEvent)
 
 import Effectful (Effect, (:>), Eff, raise)
 import Effectful.Dispatch.Dynamic (reinterpret)
@@ -25,7 +25,7 @@ runSessionContext :: forall ctx es a.
     -> (Session -> ctx -> Eff es ())
     -> Eff (SessionContext ctx : es) a
     -> Eff es a
-runSessionContext createCtx releaseCtx = reinterpret evalContextState \_ -> \case
+runSessionContext createCtx releaseCtx = reinterpret wrap \_ -> \case
     GetSessionContext token -> do
         session <- getSession token
         stateM \map ->
@@ -35,12 +35,12 @@ runSessionContext createCtx releaseCtx = reinterpret evalContextState \_ -> \cas
                     ctx <- raise $ createCtx session
                     pure (ctx, HashMap.insert token ctx map)
     where
-        evalContextState e = evalState emptyMap do
-            listen_ \case
+        wrap =
+            evalState emptyMap
+            . withEvent \case
                 OnAccountLogout session -> modifyM \map -> do
                     let (ctx, map') = HashMap.alterF (\ctx -> (ctx, Nothing)) session.token map
                     whenJust ctx $ raise . releaseCtx session
                     pure map'
-                _ -> pure()
-            e
+                _ -> pure ()
         emptyMap = HashMap.empty :: HashMap SessionToken ctx

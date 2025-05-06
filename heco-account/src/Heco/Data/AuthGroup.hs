@@ -6,10 +6,14 @@ import Data.Text (Text)
 import Data.HashSet (HashSet, empty)
 import Data.Hashable (Hashable)
 import Data.String (IsString)
+import Pattern.Cast (Cast(cast))
 
 newtype GroupName = GroupName Text
     deriving (Eq, Show)
     deriving newtype (Hashable, IsString)
+
+instance Cast GroupName Text where
+    cast (GroupName t) = t
 
 data AuthGroup = AuthGroup
     { name :: GroupName
