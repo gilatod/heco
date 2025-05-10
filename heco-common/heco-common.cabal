@@ -37,27 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-  build-depends:
-    base,
-    extra,
-    template-haskell,
-    pointed,
-    effectful,
-    effectful-core,
-    effectful-th,
-    vector,
-    vector-algorithms,
-    unboxing-vector,
-    containers,
-    unordered-containers,
-    text,
-    bytestring,
-    time,
-    data-default,
-    hashable,
-    cast,
-    aeson,
-    case-insensitive
+    -Wunused-packages
 
 library
   import: defaults
@@ -72,7 +52,20 @@ library
     Heco.Data.Typelits,
     Heco.Network.HTTP.Client,
     Heco.Effectful.Exception,
-    Heco.Effectful.HTTP
+    Heco.Effectful.HTTP,
+    Heco.Conduit.Concurrent
   build-depends:
+    base,
+    template-haskell,
+    effectful,
+    effectful-core,
     http-client,
-    http-client-tls
+    http-client-tls,
+    aeson,
+    case-insensitive,
+    bytestring,
+    text,
+    data-default,
+    vector,
+    unboxing-vector,
+    conduit

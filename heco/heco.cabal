@@ -37,27 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-  build-depends:
-    base,
-    extra,
-    template-haskell,
-    pointed,
-    effectful,
-    effectful-core,
-    effectful-th,
-    vector,
-    vector-algorithms,
-    unboxing-vector,
-    containers,
-    unordered-containers,
-    text,
-    bytestring,
-    time,
-    data-default,
-    hashable,
-    cast,
-    aeson,
-    case-insensitive
+    -Wunused-packages
 
 executable heco
   import: defaults
@@ -66,6 +46,18 @@ executable heco
   ghc-options: -O2
   default-language: GHC2024
   build-depends:
+    base,
+    effectful,
+    effectful-core,
+    resourcet-effectful,
+    vector,
+    unboxing-vector,
+    unordered-containers,
+    text,
+    data-default,
+    cast,
+    aeson,
+    xml-conduit,
     heco-common,
     heco-event,
     heco-account,
@@ -73,9 +65,7 @@ executable heco
     heco-database,
     heco-subjectivity,
     heco-ego,
-    heco-portal,
-    heco-portal-shell,
-    xml-conduit
+    heco-portal
 
 test-suite heco-tests
   import: defaults

@@ -75,6 +75,11 @@ import GHC.IO.Handle (hFlush)
 import GHC.Generics (Generic)
 import Pattern.Cast (Cast(cast))
 
+import Text.XML qualified as XML
+import Heco.Data.Immanant.Action (Action(StatementAction))
+import Heco.Data.Portal.OneBot (makeOneBotPortal, oneBotOps)
+import Effectful.Resource (runResource)
+
 ldapOps :: LdapOps
 ldapOps = LdapOps
     { host = Tls "auth.gilatod.art" def
@@ -321,11 +326,28 @@ languageTools =
     [ cast $ weatherTool @es
     , cast $ adderTool @es ]
 
+testXML :: IO ()
+testXML = do
+    let str = "<msg>hello<reply session=\"1\">hello world</reply></msg>"
+    case XML.parseText def str of
+        Left err -> putStrLn $ "Err: " ++ show err
+        Right doc -> do
+            let nodes = XML.elementNodes $ XML.documentRoot doc
+            forM_ nodes \case
+                XML.NodeElement elem -> do
+                    putStrLn $ "name: " ++ show (XML.elementName elem)
+                    putStrLn $ "attributes: " ++ show (XML.elementAttributes elem)
+                    case XML.elementNodes elem of
+                        [XML.NodeContent content] -> T.putStrLn content
+                        _ -> pure ()
+                _ -> pure ()
+
 main :: IO ()
 main = do
+    testXML
     hecoOps <- newHecoOps
     openaiOps <- newOpenAIOps
-    let run = runEff . runFailIO . runConcurrent
+    let run = runEff . runFailIO . runConcurrent . runResource
             . runSimplePrivilegeService groups
             . runThrowEither . runCombinedLanguageService openaiOps ollamaOps
             . runThrowEither . runLdapAccountServiceEx ldapOps
@@ -343,5 +365,6 @@ main = do
         -- testChat
         -- testHeco
         _ <- runPortal shellPortal
+        _ <- runPortal $ makeOneBotPortal $ oneBotOps "gilatod.local"
         forever $ threadDelay maxBound
     pure ()

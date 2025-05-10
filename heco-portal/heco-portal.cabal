@@ -37,27 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-  build-depends:
-    base,
-    extra,
-    template-haskell,
-    pointed,
-    effectful,
-    effectful-core,
-    effectful-th,
-    vector,
-    vector-algorithms,
-    unboxing-vector,
-    containers,
-    unordered-containers,
-    text,
-    bytestring,
-    time,
-    data-default,
-    hashable,
-    cast,
-    aeson,
-    case-insensitive
+    -Wunused-packages
 
 library
   import: defaults
@@ -65,15 +45,24 @@ library
   hs-source-dirs: src
   exposed-modules:
     Heco.Data.Portal,
+    Heco.Data.Portal.Shell,
+    Heco.Data.Portal.OneBot,
     Heco.Effectful.PortalService
   build-depends:
-    heco-common,
-    heco-event,
-    heco-account,
-    heco-language,
-    heco-subjectivity,
-    heco-ego,
+    base,
+    effectful,
+    effectful-core,
+    effectful-th,
+    resourcet-effectful,
+    vector,
+    unordered-containers,
+    text,
     http-client,
     http-client-tls,
     conduit,
-    http-conduit
+    network,
+    websockets >= 0.13.0.0,
+    heco-common,
+    heco-event,
+    heco-subjectivity,
+    heco-ego

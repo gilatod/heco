@@ -8,7 +8,7 @@ import Data.Text (Text)
 
 data EgoEvent
     = OnEgoInteractionStarted
-    | OnEgoToolUsed ToolCall ToolResponse
-    | OnEgoReply TerminalId Text
     | OnEgoInteractionCompleted Message
     | OnEgoInputMessagesGenerated (Vector Message)
+    | OnEgoReply TerminalId Text
+    | OnEgoToolUsed ToolCall ToolResponse

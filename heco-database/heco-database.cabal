@@ -37,27 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-  build-depends:
-    base,
-    extra,
-    template-haskell,
-    pointed,
-    effectful,
-    effectful-core,
-    effectful-th,
-    vector,
-    vector-algorithms,
-    unboxing-vector,
-    containers,
-    unordered-containers,
-    text,
-    bytestring,
-    time,
-    data-default,
-    hashable,
-    cast,
-    aeson,
-    case-insensitive
+    -Wunused-packages
 
 library
   import: defaults
@@ -72,8 +52,19 @@ library
     Heco.Effectful.DatabaseService,
     Heco.Effectful.DatabaseService.Milvus
   build-depends:
-    heco-common,
-    heco-event,
-    heco-account,
+    base,
+    template-haskell,
+    effectful,
+    effectful-core,
+    effectful-th,
+    vector,
+    unboxing-vector,
+    text,
+    data-default,
+    hashable,
+    cast,
+    aeson,
     http-client,
-    http-client-tls
+    http-client-tls,
+    heco-common,
+    heco-event

@@ -30,14 +30,22 @@ instance ImmanantContent c => Cast c AnyImmanantContent where
 data TimePhase = TimePhase Unique (Vector AnyImmanantContent)
 
 instance Show TimePhase where
-    show (TimePhase _ contents) =
-        TL.unpack $ TLB.toLazyText $ "TimePhase <" <> V.foldl accumulate mempty contents <> ">"
-        where
-            accumulate prev c = prev <> ", " <> format c
-            format (AnyImmanantContent c) =
-                TLB.fromString $ show $ encodeImmanantContent c
+    show = TL.unpack . formatTimePhase
 
 newTimePhase :: IOE :> es => Vector AnyImmanantContent -> Eff es TimePhase
 newTimePhase cs = do
     u <- liftIO $ newUnique
     pure $ TimePhase u cs
+
+timePhaseLength :: TimePhase -> Int
+timePhaseLength (TimePhase _ contents) = V.length contents
+
+formatTimePhase :: TimePhase -> TL.Text
+formatTimePhase (TimePhase _ contents) =
+    TLB.toLazyText $ "TimePhase " <> (formatList $ map formatImmanant $ V.toList contents)
+    where
+        formatImmanant (AnyImmanantContent c) =
+            formatList $ map TLB.fromText $ encodeImmanantContent c
+        formatList l =
+            let inner = mconcat $ intersperse (TLB.fromText ", ") l
+            in TLB.fromText "[" <> inner <> TLB.fromText "]"

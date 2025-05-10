@@ -11,6 +11,7 @@ import Data.Text (Text)
 import Data.Default (Default(..))
 import Data.Vector.Unboxing qualified as VU
 import Data.Typeable (cast)
+import Data.List (intersperse)
 
 import GHC.Generics (Generic)
 
@@ -29,7 +30,8 @@ instance Default Memory where
         , time = Nothing }
 
 instance ImmanantContent Memory where
-    encodeImmanantContent m = "memory":m.content
+    encodeImmanantContent m = "memory":[last m.content]
+    getImmanantContentAttributes m = [("type", mconcat $ intersperse ":" $ init m.content)]
 
 deriveEntity ''Memory
 

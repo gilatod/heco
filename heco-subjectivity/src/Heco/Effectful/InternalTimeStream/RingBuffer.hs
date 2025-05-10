@@ -1,6 +1,6 @@
 module Heco.Effectful.InternalTimeStream.RingBuffer where
 
-import Heco.Data.TimePhase (TimePhase(..), newTimePhase)
+import Heco.Data.TimePhase (TimePhase(..), newTimePhase, timePhaseLength)
 import Heco.Data.InternalTimeStreamError (InternalTimeStreamError(..))
 import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
@@ -43,17 +43,20 @@ runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
             capacity = RingBuffer.capacity retention
 
         modifyMVar urimpression \uri -> do
-            length <- liftIO $ RingBuffer.length retention
-            lostPhase <- if length == capacity
-                then liftIO $ RingBuffer.latest retention (capacity - 1)
-                else pure Nothing
+            if timePhaseLength uri == 0
+                then pure (uri, uri)
+                else do
+                    length <- liftIO $ RingBuffer.length retention
+                    lostPhase <- if length == capacity
+                        then liftIO $ RingBuffer.latest retention (capacity - 1)
+                        else pure Nothing
 
-            liftIO $ RingBuffer.append uri retention
-            whenJust lostPhase $ trigger . OnTimePhaseLost
-            trigger $ OnTimePhaseRetented uri
+                    liftIO $ RingBuffer.append uri retention
+                    whenJust lostPhase $ trigger . OnTimePhaseLost
+                    trigger $ OnTimePhaseRetented uri
 
-            timePhase <- newTimePhase mempty
-            pure (timePhase, uri)
+                    timePhase <- newTimePhase mempty
+                    pure (timePhase, uri)
         `catchIO` (\e -> throwError . UnhandledInternalTimeStreamError $ displayException e)
 
     Present newContents -> do

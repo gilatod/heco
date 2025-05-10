@@ -11,9 +11,9 @@ import Heco.Data.TimePhase
       AnyImmanantContent(AnyImmanantContent),
       joinImmanantContent )
 import Heco.Data.Immanant.Memory (Memory(..), anyImmanantContentToMemory)
-import Heco.Data.Immanant.Terminal (Terminal(..))
+import Heco.Data.Immanant.Terminal (Terminal(..), TerminalId (TerminalId))
 import Heco.Data.Collection (CollectionName)
-import Heco.Data.Message (Message(..), newUserMessage, newSystemMessage, newToolMessage, ToolCall(..), ToolResponse(..))
+import Heco.Data.Message (Message(..), newUserMessage, newSystemMessage, newToolMessage, ToolCall(..), ToolResponse(..), messageText)
 import Heco.Data.LanguageError (LanguageError)
 import Heco.Data.EgoError (EgoError(..))
 import Heco.Events.EgoEvent (EgoEvent(..))
@@ -47,6 +47,7 @@ import Effectful.Concurrent.QSem (QSem, waitQSem, signalQSem, newQSem)
 
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Read qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TLB
 
@@ -66,9 +67,13 @@ import Data.Cache.LRU qualified as LRU
 import Data.Unique (Unique)
 import Data.Tuple (swap)
 import Data.Typeable qualified as Typeable
+import Data.Map qualified as Map
+import Data.Maybe (mapMaybe)
 
-import Control.Monad (when, forM)
+import Control.Monad (when, forM, forM_)
 import Pattern.Cast (Cast(cast))
+
+import Text.XML qualified as XML
 
 data HecoMemoryOps = HecoMemoryOps
     { collectionName :: CollectionName
@@ -196,6 +201,32 @@ injectMemory ::
     => HecoOps -> Eff es ()
 injectMemory ops = associateMemory ops >>= present_
 
+parseReplies :: Text -> [(TerminalId, Text)]
+parseReplies msg =
+    case XML.parseText def $ "<msg>" <> TL.fromStrict msg <> "</msg>" of
+        Left _ -> []
+        Right doc ->
+            let nodes = XML.elementNodes $ XML.documentRoot doc
+            in mapMaybe parseRootNodes nodes
+    where
+        parseRootNodes = \case
+            XML.NodeElement node ->
+                case XML.nameLocalName $ XML.elementName node of
+                    "reply" -> parseReplyNode node
+                    _ -> Nothing
+            _ -> Nothing
+
+        parseReplyNode node =
+            let session = Map.lookup "session" $ XML.elementAttributes node
+            in case XML.elementNodes node of
+                [XML.NodeContent content] ->
+                    case T.decimal <$> session of
+                        Just (Right (id, _)) -> Just (TerminalId id, content)
+                        _ -> Nothing
+                XML.NodeElement subnode:_ -> parseReplyNode subnode
+                _:XML.NodeElement subnode:_ -> parseReplyNode subnode
+                _ -> Nothing
+
 wrapInteraction ::
     ( HasCallStack
     , IOE :> es
@@ -262,9 +293,12 @@ wrapInteraction ops eff =
                     handleReceivedMsg chatOps messages msg
 
         handleReceivedMsg chatOps messages = \case
-            msg@(AssistantMessage _ _ []) -> pure msg
-
-            AssistantMessage _ _ toolCalls -> do
+            msg@(AssistantMessage _ content []) -> do
+                sendReplyEvents content
+                pure msg
+                
+            msg@(AssistantMessage _ content toolCalls) -> do
+                sendReplyEvents content
                 respMsgs <- forM toolCalls \t -> do
                     result <- invokeLanguageTool t.name t.arguments
                     let resp = ToolResponse
@@ -272,16 +306,18 @@ wrapInteraction ops eff =
                             , name = t.name
                             , content = result }
                     trigger $ OnEgoToolUsed t resp
-                    progressPresent_
                     toolMsg <- newToolMessage resp
                     presentOne_ $ TerminalReply toolMsg
+                    progressPresent_
                     pure toolMsg
-
-                progressPresent_
-                doChat chatOps $ messages <> V.fromList respMsgs
+                doChat chatOps $ messages <> V.fromList (msg:respMsgs)
 
             msg -> throwError $ UnhandledEgoError $
                     "invalid message from message service: " ++ show msg
+
+        sendReplyEvents content =
+            forM_ (parseReplies content) $ trigger . uncurry OnEgoReply
+        
 
 runHecoEgo :: forall es a.
     ( HasCallStack

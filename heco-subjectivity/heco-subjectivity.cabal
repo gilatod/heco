@@ -37,27 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-  build-depends:
-    base,
-    extra,
-    template-haskell,
-    pointed,
-    effectful,
-    effectful-core,
-    effectful-th,
-    vector,
-    vector-algorithms,
-    unboxing-vector,
-    containers,
-    unordered-containers,
-    text,
-    bytestring,
-    time,
-    data-default,
-    hashable,
-    cast,
-    aeson,
-    case-insensitive
+    -Wunused-packages
 
 library
   import: defaults
@@ -73,6 +53,15 @@ library
     Heco.Effectful.InternalTimeStream.RingBuffer,
     Heco.Events.InternalTimeStreamEvent
   build-depends:
-    heco-common,
-    heco-event,
-    ring-buffer
+    base,
+    extra,
+    effectful,
+    effectful-core,
+    effectful-th,
+    vector,
+    text,
+    hashable,
+    cast,
+    aeson,
+    ring-buffer,
+    heco-event

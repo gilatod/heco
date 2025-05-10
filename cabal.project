@@ -1,5 +1,3 @@
-multi-repl: True
-
 packages:
   heco
   heco-account
@@ -10,7 +8,7 @@ packages:
   heco-language
   heco-subjectivity
   heco-portal
-  heco-portal-shell
 
 allow-newer:
-  base
+  base,
+  websockets

@@ -1,7 +1,7 @@
 module Heco.Data.Immanant.Terminal where
 
 import Heco.Data.TimePhase (ImmanantContent(..))
-import Heco.Data.Message (Message, messageText)
+import Heco.Data.Message (Message, formatMessage)
 
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
@@ -26,7 +26,7 @@ data Terminal
 instance ImmanantContent Terminal where
     encodeImmanantContent = \case
         TerminalChat _ c -> ["chat", c]
-        TerminalReply msg -> ["reply", messageText msg]
+        TerminalReply msg -> ["reply", TL.toStrict $ formatMessage msg]
     getImmanantContentAttributes = \case
         TerminalChat id _ -> [sessionAttr id]
         _ -> []

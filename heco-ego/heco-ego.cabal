@@ -37,27 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-  build-depends:
-    base,
-    extra,
-    template-haskell,
-    pointed,
-    effectful,
-    effectful-core,
-    effectful-th,
-    vector,
-    vector-algorithms,
-    unboxing-vector,
-    containers,
-    unordered-containers,
-    text,
-    bytestring,
-    time,
-    data-default,
-    hashable,
-    cast,
-    aeson,
-    case-insensitive
+    -Wunused-packages
 
 library
   import: defaults
@@ -71,14 +51,23 @@ library
     Heco.Effectful.Ego,
     Heco.Effectful.Ego.Heco
   build-depends:
+    base,
+    effectful,
+    effectful-core,
+    effectful-th,
+    vector,
+    vector-algorithms,
+    unboxing-vector,
+    containers,
+    text,
+    time,
+    data-default,
+    hashable,
+    cast,
+    lrucache,
+    xml-conduit,
     heco-common,
     heco-event,
-    heco-account,
     heco-language,
     heco-database,
-    heco-subjectivity,
-    text-time,
-    lrucache,
-    conduit,
-    xml-types,
-    xml-conduit
+    heco-subjectivity

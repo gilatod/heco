@@ -9,8 +9,8 @@ data PortalSignal
     = PortalReply Text
     | PortalClose
 
-type PortalProcedure m = TerminalId -> ConduitT () PortalSignal m () -> m ()
+type PortalSignalSource m = ConduitT () PortalSignal m ()
 
 data Portal m = Portal
     { name :: Text
-    , procedure :: PortalProcedure m }
+    , procedure :: TerminalId -> PortalSignalSource m -> m () }

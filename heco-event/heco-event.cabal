@@ -37,6 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
+    -Wunused-packages
   build-depends:
     base,
     extra,

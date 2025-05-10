@@ -4,7 +4,7 @@ import Control.Exception (Exception)
 
 data EgoError
     = EgoMemoryEmbeddingError String
-    | EgoInvalidNoemaError String
+    | EgoInvalidReplyError String
     | UnhandledEgoError String
     deriving (Eq, Show)
 

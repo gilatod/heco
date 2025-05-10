@@ -37,27 +37,7 @@ common defaults
     -Wno-name-shadowing
     -Wno-ambiguous-fields
     -Wredundant-constraints
-  build-depends:
-    base,
-    extra,
-    template-haskell,
-    pointed,
-    effectful,
-    effectful-core,
-    effectful-th,
-    vector,
-    vector-algorithms,
-    unboxing-vector,
-    containers,
-    unordered-containers,
-    text,
-    bytestring,
-    time,
-    data-default,
-    hashable,
-    cast,
-    aeson,
-    case-insensitive
+    -Wunused-packages
 
 library
   import: defaults
@@ -75,5 +55,15 @@ library
     Heco.Effectful.AccountService.Ldap,
     Heco.Effectful.SessionContext
   build-depends:
-    heco-event,
-    ldap-client
+    base,
+    extra,
+    effectful,
+    effectful-core,
+    effectful-th,
+    unordered-containers,
+    text,
+    time,
+    hashable,
+    cast,
+    ldap-client,
+    heco-event

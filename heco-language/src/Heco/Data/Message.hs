@@ -23,14 +23,17 @@ data ToolCall = ToolCall
     deriving (Eq, Generic)
 
 instance Show ToolCall where
-    show t =
-        TL.unpack $ TLB.toLazyText $
-            "ToolCall <" <> TLB.fromText t.name <> "> (" <> TLB.fromText t.id <> ") { " <>
-            (mconcat $ intersperse (TLB.fromText ", ") $ map formatPair $ Map.toList t.arguments) <> " }"
-        where
-            formatPair (k, v) =
-                TLB.fromText k <> " = " <>
-                TLB.fromLazyText (TL.decodeUtf8 $ Aeson.encode v)
+    show = TL.unpack . formatToolCall
+
+formatToolCall :: ToolCall -> TL.Text
+formatToolCall t =
+    TLB.toLazyText $
+        "ToolCall <" <> TLB.fromText t.name <> "> { " <>
+        (mconcat $ intersperse (TLB.fromText ", ") $ map formatPair $ Map.toList t.arguments) <> " }"
+    where
+        formatPair (k, v) =
+            TLB.fromText k <> " = " <>
+            TLB.fromLazyText (TL.decodeUtf8 $ Aeson.encode v)
 
 data ToolResponse = ToolResponse
     { id :: Text
@@ -79,11 +82,13 @@ messageText = \case
     ToolMessage _ r -> TL.toStrict $ TL.decodeUtf8 $ Aeson.encode r.content
     AssistantMessage _ t _ -> t
 
-formatMessage :: Message -> Text
+formatMessage :: Message -> TL.Text
 formatMessage = \case
-    SystemMessage _ t -> "System: " <> t
-    UserMessage _ t -> "User: " <> t
-    ToolMessage _ r -> TL.toStrict $ TLB.toLazyText $
-        "ToolResponse <" <> TLB.fromText r.name <> "> (" <> TLB.fromText r.id <> "): " <>
+    SystemMessage _ t -> "System: " <> TL.fromStrict t
+    UserMessage _ t -> "User: " <> TL.fromStrict t
+    ToolMessage _ r -> TLB.toLazyText $
+        "ToolResponse <" <> TLB.fromText r.name <> ">: " <>
         TLB.fromLazyText (TL.decodeUtf8 $ Aeson.encode r.content)
-    AssistantMessage _ t _ -> "Assistant: " <> t
+    AssistantMessage _ t c ->
+        "Assistant: " <> TL.fromStrict t <>
+        (mconcat $ map ((" " <>) . formatToolCall) c)
