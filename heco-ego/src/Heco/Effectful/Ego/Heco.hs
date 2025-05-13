@@ -13,7 +13,7 @@ import Heco.Data.TimePhase
 import Heco.Data.Immanant.Memory (Memory(..), anyImmanantContentToMemory)
 import Heco.Data.Immanant.Terminal (Terminal(..), TerminalId (TerminalId))
 import Heco.Data.Collection (CollectionName)
-import Heco.Data.Message (Message(..), newUserMessage, newSystemMessage, newToolMessage, ToolCall(..), ToolResponse(..), messageText)
+import Heco.Data.Message (Message(..), newUserMessage, newSystemMessage, newToolMessage, ToolCall(..), ToolResponse(..))
 import Heco.Data.LanguageError (LanguageError)
 import Heco.Data.EgoError (EgoError(..))
 import Heco.Events.EgoEvent (EgoEvent(..))
@@ -124,7 +124,7 @@ memorizeImmanantContents ::
     , LanguageService :> es )
     => HecoOps -> Vector AnyImmanantContent -> Eff es ()
 memorizeImmanantContents ops contents = do
-    let mems = V.map anyImmanantContentToMemory contents
+    let mems = V.mapMaybe anyImmanantContentToMemory contents
         newMems = V.filter (\ent -> isNothing ent.id) mems
 
     when (V.length newMems /= 0) do
@@ -256,22 +256,22 @@ wrapInteraction ops eff =
 
             initialPrompt <- ask @Message
             retention <- getRetention
-            urimpression <- getPresent
+            present <- getPresent
             retentionMessages <- traverse (timePhaseToMessasge ops) retention
-            urimpressionMessage <- timePhaseToMessasge ops urimpression
+            presentMessage <- timePhaseToMessasge ops present
 
             let retentionCount = V.length retention
                 messages = V.create do
                     messages <- VM.new $ retentionCount + 2
                     VM.write messages 0 initialPrompt
                     V.iforM_ retentionMessages \i msg -> VM.write messages (i + 1) msg
-                    VM.write messages (retentionCount + 1) urimpressionMessage
+                    VM.write messages (retentionCount + 1) presentMessage
                     pure messages
 
             trigger $ OnEgoInputMessagesGenerated messages
 
             tools <- getLanguageTools
-            msg <- case ops.chatOps.tools of
+            msg <- runReader present case ops.chatOps.tools of
                 [] -> doChat (ops.chatOps { tools = tools }) messages
                 ts -> doChat (ops.chatOps { tools = tools ++ ts }) messages
 
@@ -315,8 +315,9 @@ wrapInteraction ops eff =
             msg -> throwError $ UnhandledEgoError $
                     "invalid message from message service: " ++ show msg
 
-        sendReplyEvents content =
-            forM_ (parseReplies content) $ trigger . uncurry OnEgoReply
+        sendReplyEvents content = do
+            present <- ask
+            forM_ (parseReplies content) $ trigger . uncurry (OnEgoReply present)
         
 
 runHecoEgo :: forall es a.

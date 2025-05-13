@@ -29,7 +29,7 @@ formatToolCall :: ToolCall -> TL.Text
 formatToolCall t =
     TLB.toLazyText $
         "ToolCall <" <> TLB.fromText t.name <> "> { " <>
-        (mconcat $ intersperse (TLB.fromText ", ") $ map formatPair $ Map.toList t.arguments) <> " }"
+        (mconcat $ intersperse ", " $ map formatPair $ Map.toList t.arguments) <> " }"
     where
         formatPair (k, v) =
             TLB.fromText k <> " = " <>

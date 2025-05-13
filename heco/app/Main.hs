@@ -9,19 +9,15 @@ import Heco.Data.FunctionSchema
 import Heco.Data.Default ()
 import Heco.Data.Aeson (HasAesonOps, AesonDefault(..))
 import Heco.Data.AuthGroup (AuthGroup(..))
-import Heco.Data.Message (Message(..), newSystemMessage, newUserMessage)
-import Heco.Data.Embedding (Embedding(Embedding))
-import Heco.Data.Entity (EntityId)
-import Heco.Data.Entity.TH (deriveEntity)
-import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Data.LanguageTool (LanguageTool(..), LanguageToolSpec(..), Param, ParamDesc, Ret)
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.LanguageToolError (LanguageToolError(..))
 import Heco.Data.Portal.Shell (shellPortal)
+import Heco.Data.Portal.OneBot (makeOneBotPortal, OneBotOps(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Effectful.Exception (runThrowEither)
-import Heco.Effectful.Event (on, Event, runEvent)
-import Heco.Effectful.LanguageService (embed, chat, LanguageService(..), ChatOps(..))
+import Heco.Effectful.Event (Event, runEvent)
+import Heco.Effectful.LanguageService (LanguageService(..))
 import Heco.Effectful.AccountService (LoginOps(..), login, getUser, logout, AccountService)
 import Heco.Effectful.AccountService.Ldap
     ( runLdapAccountServiceEx,
@@ -40,15 +36,8 @@ import Heco.Effectful.LanguageService.Ollama (OllamaOps(..), runOllamaLanguageSe
 import Heco.Effectful.LanguageToolProvider.Native (runNativeLanguageToolProviderEx)
 import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
 import Heco.Effectful.DatabaseService
-    ( DatabaseService,
-      addEntity,
-      getEntities,
-      loadCollection,
-      setEntity_,
-      SearchOps(rangeFilter, limit, radius) )
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, present_)
+    ( SearchOps(rangeFilter, limit, radius) )
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps (RingBufferOps, capacity), runRingBufferInternalTimeStreamEx)
-import Heco.Effectful.Ego (Ego, interactEgo)
 import Heco.Effectful.Ego.Heco (runHecoEgoEx, HecoOps(..), immanantContentXMLFormatter, hecoMemoryOps, HecoMemoryOps(..))
 import Heco.Effectful.PortalService (runStandardPortalService, runPortal)
 
@@ -56,29 +45,23 @@ import Effectful (runEff, liftIO, Eff, IOE, (:>))
 import Effectful.Fail (runFailIO)
 import Effectful.Concurrent (runConcurrent, threadDelay)
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, send)
-import Effectful.State.Static.Local (evalState, get, put)
 import Effectful.Error.Dynamic (CallStack, Error, runError)
 import Effectful.Labeled (runLabeled, Labeled (Labeled))
+import Effectful.Resource (runResource)
 
 import Data.Default (Default(..))
 import Data.HashSet qualified as HashSet
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
-import Data.Vector qualified as V
-import Data.Vector.Unboxing qualified as VU
 import Data.Aeson (FromJSON, ToJSON)
 
-import Control.Monad (when, forM_, forever)
-import System.IO (stdout)
-import GHC.IO.Handle (hFlush)
+import Control.Monad (forever)
 import GHC.Generics (Generic)
 import Pattern.Cast (Cast(cast))
-
-import Text.XML qualified as XML
-import Heco.Data.Immanant.Action (Action(StatementAction))
-import Heco.Data.Portal.OneBot (makeOneBotPortal, oneBotOps)
-import Effectful.Resource (runResource)
+import Heco.Effectful.LanguageService (embed)
+import qualified Data.Vector as V
+import Heco.Data.Immanant.Action (Action(..))
+import Heco.Effectful.InternalTimeStream (present_)
 
 ldapOps :: LdapOps
 ldapOps = LdapOps
@@ -168,114 +151,9 @@ testLdap = do
     logout token
     pure ()
 
-testChat ::
-    ( HasCallStack
-    , LanguageService :> es
-    , Event LanguageEvent :> es
-    , AccountService :> es
-    , IOE :> es )
-    => Eff es ()
-testChat = do
-    token <- login $ UsernameLoginOps "test" "Holders-instance-14-sulfur"
-    prompt <- newSystemMessage "You are a helpful assistant."
-    evalState True $ doChat token (V.singleton prompt)
-        `on` \case
-            OnReasoningChunkReceived content -> liftIO do
-                T.putStr content
-                hFlush stdout
-            OnUtteranceChunkReceived content -> do
-                reasoning <- get
-                when reasoning do
-                    put False
-                    liftIO $ putStrLn "==============="
-                liftIO $ T.putStr content
-                liftIO $ hFlush stdout
-            OnMessageReceived (AssistantMessage _ _ toolCalls) -> do
-                forM_ toolCalls \toolCall ->
-                    liftIO $ putStrLn $ show toolCall
-                liftIO $ putStrLn ""
-            _ -> pure ()
-    where
-        doChat token messages = do
-            liftIO $ putStr "> " >> hFlush stdout
-            input <- liftIO $ getLine
-            put True
-            msg <- newUserMessage $ T.pack input
-            let messages' = V.snoc messages msg
-            msg <- chat ops messages'
-            doChat token $ V.snoc messages' msg
-
-        ops = (chatOps "deepseek/deepseek-chat-v3-0324:free")
-            { stream = True }
-
-data TestEntity = TestEntity
-    { id :: Maybe EntityId
-    , vector :: Maybe (VU.Vector Float)
-    , text :: Text }
-    deriving (Show, Generic, Default)
-
-deriveEntity ''TestEntity
-
-testMilvus ::
-    ( HasCallStack
-    , LanguageService :> es
-    , DatabaseService :> es
-    , IOE :> es )
-    => Eff es ()
-testMilvus = do
-    Embedding vector <- embed "mxbai-embed-large" "你好世界"
-    liftIO . putStrLn . show $ VU.length vector
-
-    loadCollection "memory"
-
-    eid <- addEntity "memory" TestEntity
-        { id = Nothing
-        , vector = Just vector
-        , text = "hello world" }
-
-    eid2 <- addEntity "memory" TestEntity
-        { id = Nothing
-        , vector = Just vector
-        , text = "hello world xxxx" }
-
-    setEntity_ "memory" TestEntity
-        { id = Just eid
-        , vector = Just vector
-        , text = "hello world 2" }
-
-    res <- getEntities @TestEntity "memory" $ VU.fromList [eid, eid2]
-    liftIO $ putStrLn $ show res
-    pure()
-
-testHeco ::
-    ( HasCallStack
-    , IOE :> es
-    , InternalTimeStream :> es
-    , Ego :> es
-    , Event LanguageEvent :> es )
-    => Eff es ()
-testHeco = doChat
-    `on` \case
-        OnUtteranceChunkReceived content -> do
-            liftIO $ T.putStr content
-            liftIO $ hFlush stdout
-        OnMessageReceived (AssistantMessage _ _ toolCalls) -> do
-            forM_ toolCalls \toolCall ->
-                liftIO $ putStrLn $ show toolCall
-            liftIO $ putStrLn ""
-        _ -> pure ()
-    where
-        doChat = do
-            liftIO $ putStr "> " >> hFlush stdout
-            input <- liftIO $ getLine
-            interactEgo do
-                present_ $ V.fromList
-                    [ cast $ TerminalChat 1 $ "User: " <> T.pack input ]
-            doChat
-
 newHecoOps :: IO HecoOps
 newHecoOps = do
-    characterPrompt <- readFile "./prompts/character.md"
+    characterPrompt <- readFile "./prompts/characters/heco.md"
     taskPrompt <- readFile "./prompts/task.md"
     pure HecoOps
         { characterPrompt = T.pack characterPrompt
@@ -326,25 +204,8 @@ languageTools =
     [ cast $ weatherTool @es
     , cast $ adderTool @es ]
 
-testXML :: IO ()
-testXML = do
-    let str = "<msg>hello<reply session=\"1\">hello world</reply></msg>"
-    case XML.parseText def str of
-        Left err -> putStrLn $ "Err: " ++ show err
-        Right doc -> do
-            let nodes = XML.elementNodes $ XML.documentRoot doc
-            forM_ nodes \case
-                XML.NodeElement elem -> do
-                    putStrLn $ "name: " ++ show (XML.elementName elem)
-                    putStrLn $ "attributes: " ++ show (XML.elementAttributes elem)
-                    case XML.elementNodes elem of
-                        [XML.NodeContent content] -> T.putStrLn content
-                        _ -> pure ()
-                _ -> pure ()
-
 main :: IO ()
 main = do
-    testXML
     hecoOps <- newHecoOps
     openaiOps <- newOpenAIOps
     let run = runEff . runFailIO . runConcurrent . runResource
@@ -365,6 +226,8 @@ main = do
         -- testChat
         -- testHeco
         _ <- runPortal shellPortal
-        _ <- runPortal $ makeOneBotPortal $ oneBotOps "gilatod.local"
+        _ <- runPortal $ makeOneBotPortal def
+            { webapiUrl = "http://gilatod.local:3000"
+            , websocketHost = "gilatod.local" }
         forever $ threadDelay maxBound
     pure ()

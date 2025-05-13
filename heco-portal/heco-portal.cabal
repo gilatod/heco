@@ -50,6 +50,8 @@ library
     Heco.Effectful.PortalService
   build-depends:
     base,
+    extra,
+    cast,
     effectful,
     effectful-core,
     effectful-th,
@@ -62,6 +64,8 @@ library
     conduit,
     network,
     websockets >= 0.13.0.0,
+    aeson,
+    data-default,
     heco-common,
     heco-event,
     heco-subjectivity,

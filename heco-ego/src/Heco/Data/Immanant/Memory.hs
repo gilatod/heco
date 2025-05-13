@@ -35,12 +35,14 @@ instance ImmanantContent Memory where
 
 deriveEntity ''Memory
 
-immanantContentToMemory :: ImmanantContent c => c -> Memory
+immanantContentToMemory :: ImmanantContent c => c -> Maybe Memory
 immanantContentToMemory c =
     case cast c of
-        Just mem -> mem
-        _ -> def { content = encodeImmanantContent c }
+        Just mem -> Just mem
+        _ -> case encodeImmanantContent c of
+            [] -> Nothing
+            contents -> Just $ def { content = contents }
 
-anyImmanantContentToMemory :: AnyImmanantContent -> Memory
+anyImmanantContentToMemory :: AnyImmanantContent -> Maybe Memory
 anyImmanantContentToMemory (AnyImmanantContent c) =
     immanantContentToMemory c

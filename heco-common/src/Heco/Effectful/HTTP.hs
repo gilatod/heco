@@ -11,12 +11,16 @@ import Network.HTTP.Client
       responseTimeoutNone )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 
-evalHttpManager ::
-    IOE :> es => Maybe Int -> Eff (Reader Manager : es) b -> Eff es b
-evalHttpManager timeout e = do
-    manager <- liftIO $ newManager tlsManagerSettings
+makeHttpManager :: Maybe Int -> IO Manager
+makeHttpManager timeout =
+    newManager tlsManagerSettings
         { managerResponseTimeout =
             maybe responseTimeoutNone
                 (\timeout -> responseTimeoutMicro $ timeout * 1000000)
                 timeout }
+
+evalHttpManager ::
+    IOE :> es => Maybe Int -> Eff (Reader Manager : es) b -> Eff es b
+evalHttpManager timeout e = do
+    manager <- liftIO $ makeHttpManager timeout
     runReader manager e

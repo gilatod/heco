@@ -92,6 +92,6 @@ runStandardPortalService = reinterpret wrap \env -> \case
             evalState (HashMap.empty :: PortalStates)
             . evalState (0 :: TerminalId)
             . withEvent \case
-                OnEgoReply id content ->
-                    doSendToPortal id (PortalReply content) >> pure ()
+                OnEgoReply phase id content ->
+                    doSendToPortal id (PortalReply phase content) >> pure ()
                 _ -> pure ()

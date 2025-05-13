@@ -2,7 +2,7 @@ module Heco.Data.Portal.Shell where
 
 import Heco.Conduit.Concurrent (mergeSources)
 import Heco.Data.Portal (Portal(..), PortalSignal(..))
-import Heco.Data.TimePhase (formatTimePhase)
+import Heco.Data.TimePhase (format)
 import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Effectful.InternalTimeStream (InternalTimeStream, presentOne_, getRetention)
 import Heco.Effectful.Ego (interactEgo, Ego)
@@ -39,23 +39,23 @@ shellPortal = Portal
     { name = "shell"
     , procedure = procedure }
     where
-        procedure id sigSrc = do
+        procedure pid sigSrc = do
             tid <- myThreadId
             C.runConduit $ mergeSources
-                (stdinLines .| handleUserInput id)
+                (stdinLines .| handleUserInput pid)
                 (sigSrc .| handleSigSrc tid)
 
-        handleUserInput id = C.awaitForever \case
+        handleUserInput pid = C.awaitForever \case
             "/history" -> do
                 retention <- C.lift getRetention
-                V.forM_ retention $ liftIO . TL.putStrLn . formatTimePhase
+                V.forM_ retention $ liftIO . TL.putStrLn . format
             "/quit" -> do
                 liftIO $ exitWith ExitSuccess
             s -> if T.head s == '/'
                 then liftIO $ putStrLn "Error: invalid command!"
                 else C.lift $ interactEgo do
-                    presentOne_ $ TerminalChat id $ "User: " <> s
+                    presentOne_ $ TerminalChat pid $ "User: " <> s
 
         handleSigSrc tid = C.awaitForever \case
-            PortalReply msg -> liftIO $ T.putStrLn msg
+            PortalReply _ msg -> liftIO $ T.putStrLn msg
             PortalClose -> C.lift $ killThread tid
