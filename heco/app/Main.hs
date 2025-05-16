@@ -58,10 +58,6 @@ import Data.Aeson (FromJSON, ToJSON)
 import Control.Monad (forever)
 import GHC.Generics (Generic)
 import Pattern.Cast (Cast(cast))
-import Heco.Effectful.LanguageService (embed)
-import qualified Data.Vector as V
-import Heco.Data.Immanant.Action (Action(..))
-import Heco.Effectful.InternalTimeStream (present_)
 
 ldapOps :: LdapOps
 ldapOps = LdapOps
