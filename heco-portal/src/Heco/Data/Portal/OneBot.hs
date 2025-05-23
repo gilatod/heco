@@ -109,8 +109,8 @@ deriveFromJSON defaultAesonOps ''OneBotSender
 deriveFromJSON defaultAesonOps ''OneBotEvent
 deriveToJSON defaultAesonOps ''OneBotSendingMessage
 
-sourceOneBotWebsocket :: MonadResource m => OneBotOps -> ConduitT i OneBotEvent m ()
-sourceOneBotWebsocket ops = do
+oneBotWebsocketSource :: MonadResource m => OneBotOps -> ConduitT i OneBotEvent m ()
+oneBotWebsocketSource ops = do
     addrs <- liftIO $
         S.getAddrInfo
             (Just $ S.defaultHints { S.addrSocketType = S.Stream })
@@ -167,7 +167,7 @@ makeOneBotPortal ops = Portal
             tid <- myThreadId
             httpMgr <- liftIO $ makeHttpManager ops.webapiTimeout
             C.runConduit $ mergeSources
-                (sourceOneBotWebsocket ops .| readEvent pid)
+                (oneBotWebsocketSource ops .| readEvent pid)
                 (sigSrc .| handleSigSrc tid httpMgr)
 
         readEvent pid = C.awaitForever \e -> do
@@ -175,7 +175,7 @@ makeOneBotPortal ops = Portal
                 doPresent = presentMessage pid username e
             case e.message of
                 parts | e.message_type == "private" -> doPresent parts
-                headPart:parts | isAtSelfMessage e.self_id headPart -> doPresent parts
+                headPart:parts | isAtMessage e.self_id headPart -> doPresent parts
                 _ -> pure ()
 
         presentMessage pid user event parts = do
@@ -188,11 +188,11 @@ makeOneBotPortal ops = Portal
                     [ cast $ TerminalChat pid text
                     , cast event ]
 
-        isAtSelfMessage self_id headPart =
+        isAtMessage selfId headPart =
             headPart._type == "at" &&
                 case maybe (Left "") T.decimal headPart._data.qq of
                     Left _ -> False
-                    Right (qq, _) -> qq == self_id
+                    Right (qq, _) -> qq == selfId
 
         handleSigSrc tid httpMgr = C.awaitForever \case
             PortalReply phase msg -> do
@@ -203,6 +203,7 @@ makeOneBotPortal ops = Portal
                         req <- liftIO $ httpPost (ops.webapiUrl <> path) apiHeaders r
                         liftIO (httpLbs req httpMgr) >> pure ()
             PortalClose -> C.lift $ killThread tid
+            _ -> pure ()
 
         makeResponseMessage event msg =
             case event.message_type of

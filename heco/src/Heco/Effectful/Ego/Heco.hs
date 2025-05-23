@@ -4,12 +4,12 @@ module Heco.Effectful.Ego.Heco where
 
 import Heco.Data.Default ()
 import Heco.Data.Model (ModelName)
-import Heco.Data.Embedding (Embedding(..))
+import Heco.Data.Embedding (Embedding)
 import Heco.Data.TimePhase
     ( TimePhase(..),
       ImmanantContent(..),
       AnyImmanantContent(AnyImmanantContent),
-      joinImmanantContent )
+      joinImmanantContent, castImmanantContent )
 import Heco.Data.Immanant.Memory (Memory(..), anyImmanantContentToMemory)
 import Heco.Data.Immanant.Terminal (Terminal(..), TerminalId (TerminalId))
 import Heco.Data.Collection (CollectionName)
@@ -24,7 +24,7 @@ import Heco.Effectful.DatabaseService
       DatabaseService,
       searchEntities,
       loadCollection,
-      addEntities_ )
+      addEntities_, SearchData (DenseVectorData) )
 import Heco.Effectful.LanguageService
     ( chat, embed, embedMany, ChatOps(..), LanguageService )
 import Heco.Effectful.LanguageToolProvider (LanguageToolProvider, invokeLanguageTool, getLanguageTools)
@@ -41,7 +41,7 @@ import Effectful.Dispatch.Dynamic (localSeqUnlift, HasCallStack, reinterpret)
 import Effectful.State.Static.Shared (State, modify, state, evalState)
 import Effectful.Reader.Static (runReader, Reader, ask)
 import Effectful.Error.Dynamic (Error, throwError, runError, CallStack, catchError)
-import Effectful.Exception (finally, catch, Exception(displayException), SomeException)
+import Effectful.Exception (finally, Exception(displayException))
 import Effectful.Concurrent (Concurrent)
 import Effectful.Concurrent.QSem (QSem, waitQSem, signalQSem, newQSem)
 
@@ -66,7 +66,6 @@ import Data.Cache.LRU (LRU)
 import Data.Cache.LRU qualified as LRU
 import Data.Unique (Unique)
 import Data.Tuple (swap)
-import Data.Typeable qualified as Typeable
 import Data.Map qualified as Map
 import Data.Maybe (mapMaybe)
 
@@ -74,6 +73,7 @@ import Control.Monad (when, forM, forM_)
 import Pattern.Cast (Cast(cast))
 
 import Text.XML qualified as XML
+import Data.String (IsString(fromString))
 
 data HecoMemoryOps = HecoMemoryOps
     { collectionName :: CollectionName
@@ -159,7 +159,7 @@ timePhaseToMessasge ops (TimePhase unique contents) = do
         Nothing -> do
             msg <- if V.length contents == 0
                 then newUserMessage ""
-                else case Typeable.cast $ contents V.! 0 of
+                else case castImmanantContent $ contents V.! 0 of
                     Just (TerminalReply msg) -> pure msg
                     _ -> createUserMsg contents
             modify $ LRU.insert unique msg
@@ -186,9 +186,9 @@ associateMemory ops = do
                 collection = memoryOps.collectionName
 
             loadCollection collection
-            embeddings <- traverse (embedImmanantContent ops) contents
-            memEnts <- searchEntities @Memory
-                collection memoryOps.searchOps (V.map cast $ embeddings)
+            embeddings <- contents & traverse \c ->
+                embedImmanantContent ops c >>= pure . DenseVectorData
+            memEnts <- searchEntities @Memory collection memoryOps.searchOps embeddings
 
             let nubbedEnts = V.nubBy (\a b -> compare a.id b.id) memEnts
             pure $ V.map cast nubbedEnts
@@ -243,8 +243,7 @@ wrapInteraction ::
     , Error EgoError :> es )
     => HecoOps -> Eff es a -> Eff es a
 wrapInteraction ops eff = 
-    startInteraction
-        >> finally eff finalizeInteraction
+    startInteraction >> finally eff finalizeInteraction
     where
         startInteraction = do
             ask @QSem >>= waitQSem
@@ -293,18 +292,18 @@ wrapInteraction ops eff =
                     handleReceivedMsg chatOps messages msg
 
         handleReceivedMsg chatOps messages = \case
-            msg@(AssistantMessage _ content []) -> do
-                sendReplyEvents content
+            msg@(AssistantMessage _ statement _ []) -> do
+                sendReplyEvents statement
                 pure msg
                 
-            msg@(AssistantMessage _ content toolCalls) -> do
-                sendReplyEvents content
+            msg@(AssistantMessage _ statement _ toolCalls) -> do
+                sendReplyEvents statement
                 respMsgs <- forM toolCalls \t -> do
                     result <- invokeLanguageTool t.name t.arguments
                     let resp = ToolResponse
                             { id = t.id
                             , name = t.name
-                            , content = result }
+                            , content = either (fromString . displayException) id result }
                     trigger $ OnEgoToolUsed t resp
                     toolMsg <- newToolMessage resp
                     presentOne_ $ TerminalReply toolMsg
@@ -313,7 +312,7 @@ wrapInteraction ops eff =
                 doChat chatOps $ messages <> V.fromList (msg:respMsgs)
 
             msg -> throwError $ UnhandledEgoError $
-                    "invalid message from message service: " ++ show msg
+                "invalid message from message service: " ++ show msg
 
         sendReplyEvents content = do
             present <- ask
@@ -341,8 +340,7 @@ runHecoEgo ops = reinterpret wrap \env -> \case
             OnTimePhaseLost (TimePhase _ contents) ->
                 memorizeImmanantContents ops contents
             _ -> pure ()
-        `catch` \(e :: SomeException) ->
-            (throwError . UnhandledEgoError $ displayException e)
+            
     where
         wrap e = do
             initialPrompt <- newSystemMessage $ ops.characterPrompt <> "\n\n" <> ops.taskPrompt

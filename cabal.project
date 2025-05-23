@@ -1,3 +1,5 @@
+snapshot: 2025-05-22T21:49:07Z
+
 packages:
   heco
   heco-account
@@ -11,4 +13,7 @@ packages:
 
 allow-newer:
   base,
-  websockets
+  websockets,
+  bytestring,
+  text,
+  aeson

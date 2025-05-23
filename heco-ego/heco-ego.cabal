@@ -48,26 +48,18 @@ library
     Heco.Data.Immanant.Terminal,
     Heco.Data.EgoError,
     Heco.Events.EgoEvent,
-    Heco.Effectful.Ego,
-    Heco.Effectful.Ego.Heco
+    Heco.Effectful.Ego
   build-depends:
     base,
-    effectful,
     effectful-core,
     effectful-th,
     vector,
-    vector-algorithms,
     unboxing-vector,
-    containers,
     text,
     time,
     data-default,
     hashable,
     cast,
-    lrucache,
-    xml-conduit,
-    heco-common,
-    heco-event,
     heco-language,
     heco-database,
     heco-subjectivity

@@ -2,13 +2,11 @@
 
 ### 聊天会话
 
-你会收到一系列其他用户发来的聊天消息，消息格式为 XML，见下文。
-
-<chat session="SESSION_ID">...</chat> 包含一次来其他用户的聊天会话消息。其中 SESSION_ID 表示此次会话的 ID。例如：
+你会收到一系列其他用户发来的聊天消息，消息格式为 <chat session="SESSION_ID">...</chat>。其中 SESSION_ID 表示此次会话的 ID。例如：
 
 <chat session="1">小明: 你好！</chat>
 
-如果你想回复这位用户，则在输出内容中加入以下 XML 元素：<reply session="SESSION_ID">...</reply>。注意：回复内容**必须**为纯文本格式。例如：
+在回复用户时，必须使用以下 XML 格式：<reply session="SESSION_ID">...</reply>，其中 SESSION_ID 表示想要回复的用户的会话 ID。例如：
 
 <reply session="1">你好，小明。</reply>
 

@@ -11,12 +11,12 @@ module Heco.Effectful.DatabaseService.Milvus
 
 import Heco.Network.HTTP.Client (httpPost)
 import Heco.Data.Aeson (defaultAesonOps)
-import Heco.Data.Entity (EntityId(..), IsEntityData, Entity (entityDataFields))
+import Heco.Data.Entity (EntityId(..), entityDataFields, Entity)
 import Heco.Data.DatabaseError (DatabaseError(..))
 import Heco.Data.Collection (CollectionName(CollectionName))
 import Heco.Events.DatabaseEvent (DatabaseEvent(..))
 import Heco.Effectful.HTTP (evalHttpManager)
-import Heco.Effectful.DatabaseService (DatabaseService(..), CollectionLoadState(..), QueryOps(..), SearchOps(..))
+import Heco.Effectful.DatabaseService (DatabaseService(..), CollectionLoadState(..), QueryOps(..), SearchOps(..), SearchData(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful (IOE, (:>), Eff, MonadIO (liftIO))
@@ -159,7 +159,7 @@ data MilvusSearchParams = MilvusSearchParams
 data MilvusSearchOps = MilvusSearchOps
     { dbName :: Maybe Text
     , collectionName :: Text
-    , _data :: Vector (VU.Vector Float)
+    , _data :: Vector SearchData
     , annsField :: Text
     , searchParams :: Maybe MilvusSearchParams
     , filter :: Maybe Text
@@ -274,7 +274,7 @@ collectionRequest_ ops url col =
 
 setEntitiesImpl ::
     ( HasCallStack
-    , IsEntityData e
+    , Entity e
     , IsMilvusResponse resp
     , IOE :> es
     , Reader Manager :> es
@@ -307,7 +307,7 @@ getEntitiesImpl ops (CollectionName col) ids = do
             { dbName = ops.database
             , collectionName = col
             , id = ids
-            , outputFields = "id" : entityDataFields @e }
+            , outputFields = entityDataFields @e }
     case resp._data of
         Nothing -> throwInvalidResponseError
         Just es -> pure es
@@ -399,23 +399,23 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
                 , filter = queryOps.filter
                 , limit = queryOps.limit
                 , offset = queryOps.offset
-                , outputFields = "id" : entityDataFields @e }
+                , outputFields = entityDataFields @e }
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just es -> pure es
 
-    SearchEntities @e (CollectionName col) searchOps vectors -> do
+    SearchEntities @e (CollectionName col) searchOps searchData -> do
         resp <- milvusPost @(MilvusGetResp e) ops "/vectordb/entities/search"
             MilvusSearchOps
                 { dbName = ops.database
                 , collectionName = col
-                , _data = vectors
-                , annsField = "vector"
+                , _data = searchData
+                , annsField = searchOps.vectorField
                 , searchParams = newMilvusSearchParams searchOps
                 , filter = searchOps.filter
                 , limit = searchOps.limit
                 , offset = searchOps.offset
-                , outputFields = "id" : entityDataFields @e }
+                , outputFields = entityDataFields @e }
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just es -> pure es

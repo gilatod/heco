@@ -30,6 +30,12 @@ data PortalService :: Effect where
 
 makeEffect ''PortalService
 
+runPortal_ :: PortalService :> es => Portal (Eff es) -> Eff es ()
+runPortal_ portal = runPortal portal >> pure ()
+
+killPortal_ :: PortalService :> es => TerminalId -> Eff es ()
+killPortal_ id = killPortal_ id >> pure ()
+
 sendToPortal_ :: PortalService :> es => TerminalId -> PortalSignal -> Eff es ()
 sendToPortal_ id sig = sendToPortal id sig >> pure ()
 
@@ -48,6 +54,9 @@ type PortalStates = HashMap TerminalId PortalState
 
 lookupPortalState :: State PortalStates :> es => TerminalId -> Eff es (Maybe PortalState)
 lookupPortalState id = gets @PortalStates $ HashMap.lookup id
+
+removePortalState :: State PortalStates :> es => TerminalId -> Eff es (Maybe PortalState)
+removePortalState id = state @PortalStates $ HashMap.alterF (\s -> (s, Nothing)) id
 
 doSendToPortal ::
     ( Concurrent :> es
@@ -80,7 +89,7 @@ runStandardPortalService = reinterpret wrap \env -> \case
     GetPortalIds -> gets @PortalStates HashMap.keys
     GetPortalName id -> lookupPortalState id >>= pure . fmap (\ps -> ps.name)
     KillPortal id -> do
-        res <- lookupPortalState id
+        res <- removePortalState id
         case res of
             Nothing -> pure False
             Just ps -> do

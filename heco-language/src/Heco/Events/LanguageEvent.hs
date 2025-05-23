@@ -8,6 +8,6 @@ import Data.Vector (Vector)
 
 data LanguageEvent
     = OnReasoningChunkReceived Text
-    | OnUtteranceChunkReceived Text
+    | OnStatementChunkReceived Text
     | OnMessageReceived Message
     | OnEmbeddingsReceived (Vector Text) (Vector Embedding)

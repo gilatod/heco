@@ -13,14 +13,14 @@ import Heco.Data.Aeson (defaultAesonOps)
 import Heco.Data.Model (ModelName(ModelName))
 import Heco.Data.Message (Message(..), ToolCall(..), ToolResponse(..), newAssistantMessage, messageUnique)
 import Heco.Data.LanguageError (LanguageError(..))
-import Heco.Data.Embedding (Embedding(Embedding))
+import Heco.Data.Embedding (Embedding)
 import Heco.Data.Role (Role(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.Event (Event, trigger, runEvent)
 import Heco.Effectful.LanguageService (LanguageService(..), ChatOps(..))
 import Heco.Effectful.LanguageService.Common (unliftEventIO, relayError)
-import Heco.Network.HTTP.Client (httpPost)
+import Heco.Network.HTTP.Client (httpPost, httpRequestRaw)
 
 import Effectful (Eff, (:>), IOE, MonadIO (liftIO), runEff)
 import Effectful.Dispatch.Dynamic (reinterpret)
@@ -54,7 +54,7 @@ import Data.ByteString.Internal (c2w)
 
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Text qualified as Aeson
-import Data.Aeson (FromJSON(..), Object, Value)
+import Data.Aeson (FromJSON(..), Object, Value (..))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.TH (deriveToJSON, deriveFromJSON, deriveJSON)
 
@@ -93,8 +93,7 @@ data OpenAIErrorMetadata = OpenAIErrorMetadata
     deriving (Show)
 
 data OpenAIError = OpenAIError
-    { code :: Int
-    , message :: Text
+    { message :: Text
     , metadata :: Maybe OpenAIErrorMetadata }
     deriving (Show)
 
@@ -113,9 +112,10 @@ data OpenAIToolCall = OpenAIToolCall
     deriving (Show)
 
 data OpenAIMessage = OpenAIMessage
-    { role :: Role
+    { role :: Maybe Role
     , content :: Maybe Text
     , reasoning :: Maybe Text
+    , reasoning_content :: Maybe Text
     , tool_calls :: Maybe [OpenAIToolCall]
     , tool_call_id :: Maybe Text
     , name :: Maybe Text }
@@ -123,8 +123,9 @@ data OpenAIMessage = OpenAIMessage
 
 instance Default OpenAIMessage where
     def = OpenAIMessage
-        { role = System
+        { role = Just System
         , reasoning = Nothing
+        , reasoning_content = Nothing
         , content = Nothing
         , tool_calls = Nothing
         , tool_call_id = Nothing
@@ -156,12 +157,8 @@ deriveFromJSON defaultAesonOps ''OpenAIChatResp
 deriveFromJSON defaultAesonOps ''OpenAIChatStreamChoice
 deriveFromJSON defaultAesonOps ''OpenAIChatStreamResp
 
-data OpenAIProviderOps = OpenAIProviderOps
-    { order :: [Text] }
-
 data OpenAIChatOps = OpenAIChatOps
     { model :: Text
-    , provider :: Maybe OpenAIProviderOps
     , messages :: Vector OpenAIMessage
     , tools :: [FunctionSchema]
     , stream :: Bool
@@ -171,7 +168,6 @@ data OpenAIChatOps = OpenAIChatOps
     , presence_penalty :: Maybe Float
     , frequency_penalty :: Maybe Float }
 
-deriveToJSON defaultAesonOps ''OpenAIProviderOps
 deriveToJSON defaultAesonOps ''OpenAIChatOps
 
 data OpenAIEmbeddingOps = OpenAIEmbeddingOps
@@ -273,20 +269,21 @@ fromCompleteOpenAIToolCall toolCall =
 
 data ChatStreamState = ChatStreamState
     { reasoning :: BS.Builder
-    , utterance :: BS.Builder
+    , statement :: BS.Builder
     , toolCalls :: Vector ToolCallBuilder }
 
 instance Default ChatStreamState where
     def = ChatStreamState
         { reasoning = mempty
-        , utterance = mempty
+        , statement = mempty
         , toolCalls = mempty }
 
 chatStreamStateToMessage :: IOE :> es => ChatStreamState -> Eff es Message
 chatStreamStateToMessage state =
-    newAssistantMessage content toolCalls
+    newAssistantMessage statement reasoning toolCalls
     where
-        content = builderToText state.utterance
+        statement = builderToText state.statement
+        reasoning = builderToText state.reasoning
         toolCalls = V.toList $ V.map fromToolCallBuilder state.toolCalls
         builderToText = T.decodeUtf8 . BS.toStrict . BS.toLazyByteString
 
@@ -335,13 +332,13 @@ handleChatResponse chatOps triggerEvent response = do
                 case r.choices of
                     Just (c:_) -> do
                         let delta = c.delta
-                            reasoning = fromMaybe "" delta.reasoning
-                            utterance = fromMaybe "" delta.content
+                            reasoning = fromMaybe "" $ delta.reasoning <> delta.reasoning_content
+                            statement = fromMaybe "" delta.content
                         when (T.length reasoning /= 0) $ onReasoningReceived reasoning
-                        when (T.length utterance /= 0) $ onUtteranceReceived utterance
+                        when (T.length statement /= 0) $ onStatementReceived statement
                         pure state
                             { reasoning = state.reasoning <> T.encodeUtf8Builder reasoning
-                            , utterance = state.utterance <> T.encodeUtf8Builder utterance
+                            , statement = state.statement <> T.encodeUtf8Builder statement
                             , toolCalls = maybe state.toolCalls (flip appendToolCalls state.toolCalls) delta.tool_calls }
                     _ -> throw $ LanguageBackendError "no message received"
 
@@ -352,16 +349,16 @@ handleChatResponse chatOps triggerEvent response = do
                 case r.choices of
                     Just (c:_) -> do
                         let message = c.message
-                            utterance = fromMaybe "" message.content
+                            statement = fromMaybe "" message.content
                             reasoning = fromMaybe "" message.reasoning
                         when (T.length reasoning /= 0) $ onReasoningReceived reasoning
-                        when (T.length utterance /= 0) $ onUtteranceReceived utterance
-                        runEff $ newAssistantMessage utterance $
+                        when (T.length statement /= 0) $ onStatementReceived statement
+                        runEff $ newAssistantMessage statement reasoning $
                             maybe [] (map fromCompleteOpenAIToolCall) message.tool_calls
                     _ -> throw $ LanguageBackendError "no message received"
 
         onReasoningReceived = triggerEvent . OnReasoningChunkReceived
-        onUtteranceReceived = triggerEvent . OnUtteranceChunkReceived
+        onStatementReceived = triggerEvent . OnStatementChunkReceived
 
 embedImpl ::
     ( HasCallStack
@@ -403,22 +400,25 @@ encodeMessage msg = do
     where
         doEncode = \case
             SystemMessage _ t -> def
-                { role = System
+                { role = Just System
                 , content = Just t }
             UserMessage _ t -> def
-                { role = User
+                { role = Just User
                 , content = Just t }
             ToolMessage _ r ->
                 let json = TL.toStrict $ Aeson.encodeToLazyText r.content
                 in def
-                    { role = Tool
+                    { role = Just Tool
                     , tool_call_id = Just r.id
                     , name = Just r.name
                     , content = Just json }
-            AssistantMessage _ t toolCalls -> def
-                { role = Assistant
-                , content = Just t
-                , tool_calls = Just $ map encodeToolCall $ zip [0..] toolCalls }
+            AssistantMessage _ statement reasoning toolCalls -> def
+                { role = Just Assistant
+                , content = Just statement
+                , reasoning = Just reasoning
+                , tool_calls = case toolCalls of
+                    [] -> Nothing
+                    _ -> Just $ map encodeToolCall $ zip [0..] toolCalls }
 
         encodeToolCall (i, t) = OpenAIToolCall
             { id = t.id
@@ -440,7 +440,6 @@ runOpenAILanguageService ops = reinterpret wrap \env -> \case
 
         let req = OpenAIChatOps
                 { model = cast chatOps.modelName
-                , provider = OpenAIProviderOps <$> chatOps.providers 
                 , messages = encodedMsgs
                 , tools = chatOps.tools
                 , stream = chatOps.stream
@@ -449,9 +448,15 @@ runOpenAILanguageService ops = reinterpret wrap \env -> \case
                 , max_token = chatOps.maxToken
                 , presence_penalty = chatOps.presencePenalty
                 , frequency_penalty = chatOps.frequencyPenalty }
+            reqJSON =
+                let bs = Aeson.encode req
+                    extra = chatOps.extra
+                in if KeyMap.null extra
+                    then bs
+                    else BSL.take (BSL.length bs - 1) bs <> "," <> BSL.drop 1 (Aeson.encode extra)
 
         msg <- unliftEventIO env \unlift -> do
-            req' <- httpPost (ops.url <> "/chat/completions") headers req
+            req' <- httpRequestRaw "POST" (ops.url <> "/chat/completions") headers reqJSON
             withResponse req' manager $
                 handleChatResponse chatOps (unlift . trigger)
         trigger $ OnMessageReceived msg

@@ -12,6 +12,7 @@ import Effectful.Error.Dynamic (Error, throwError, CallStack, runError)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Text qualified as T
 import Data.Function ((&))
+import Effectful.Exception (SomeException(..), catch)
 
 runNativeLanguageToolProvider ::
     ( HasCallStack
@@ -25,7 +26,10 @@ runNativeLanguageToolProvider tools = interpret \_ -> \case
         case HashMap.lookup name toolMap of
             Nothing -> throwError $ LanguageToolNotFoundError $
                 "language tool not found: " ++ T.unpack name
-            Just spec -> spec.handler args
+            Just spec ->
+                (Right <$> spec.handler args)
+                `catch` \(e :: SomeException) -> pure (Left e)
+                    
     where
         schemas = map (\spec -> spec.schema) tools
         toolMap = HashMap.fromList $

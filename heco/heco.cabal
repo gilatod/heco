@@ -38,26 +38,38 @@ common defaults
     -Wno-ambiguous-fields
     -Wredundant-constraints
     -Wunused-packages
-
-executable heco
+  
+library
   import: defaults
-  main-is: Main.hs
-  hs-source-dirs: app
-  ghc-options: -O2
   default-language: GHC2024
+  hs-source-dirs: src
+  exposed-modules:
+    Heco.Effectful.Ego.Heco,
+    Heco.Agent.Options,
+    Heco.Agent.AuthGroups,
+    Heco.Agent.LanguageTools.Archives,
+    Heco.Agent
   build-depends:
     base,
     effectful,
     effectful-core,
     resourcet-effectful,
     vector,
+    vector-algorithms,
     unboxing-vector,
+    containers,
     unordered-containers,
     text,
     data-default,
     cast,
     aeson,
+    aeson-qq,
+    PyF,
+    time,
+    lrucache,
     xml-conduit,
+    log-base,
+    log-effectful,
     heco-common,
     heco-event,
     heco-account,
@@ -66,6 +78,15 @@ executable heco
     heco-subjectivity,
     heco-ego,
     heco-portal
+
+executable heco-agent
+  import: defaults
+  main-is: Main.hs
+  hs-source-dirs: app
+  default-language: GHC2024
+  build-depends:
+    base,
+    heco
 
 test-suite heco-tests
   import: defaults

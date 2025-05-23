@@ -60,7 +60,6 @@ library
     unordered-containers,
     text,
     http-client,
-    http-client-tls,
     conduit,
     network,
     websockets >= 0.13.0.0,

@@ -54,6 +54,9 @@ format (TimePhase _ contents) =
             let inner = mconcat $ intersperse ", " l
             in "[" <> inner <> "]"
 
+castImmanantContent :: ImmanantContent c => AnyImmanantContent -> Maybe c
+castImmanantContent (AnyImmanantContent c) = Typeable.cast c
+
 getImmanantContent :: forall c. ImmanantContent c => TimePhase -> Maybe c
 getImmanantContent (TimePhase _ contents) = find 0
     where
@@ -61,14 +64,10 @@ getImmanantContent (TimePhase _ contents) = find 0
         find i
             | i >= contentCount = Nothing
             | otherwise =
-                case contents V.! i of
-                    AnyImmanantContent c ->
-                        case Typeable.cast c :: Maybe c of
-                            Just res -> Just res
-                            Nothing -> find $ i + 1
+                case castImmanantContent $ contents V.! i of
+                    Just res -> Just res
+                    Nothing -> find $ i + 1
 
 getImmanantContents :: forall c. ImmanantContent c => TimePhase -> Vector c
 getImmanantContents (TimePhase _ contents) =
-    V.mapMaybe doGet contents
-    where
-        doGet (AnyImmanantContent c) = Typeable.cast c :: Maybe c
+    V.mapMaybe castImmanantContent contents

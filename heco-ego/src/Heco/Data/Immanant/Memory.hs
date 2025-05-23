@@ -20,14 +20,7 @@ data Memory = Memory
     , vector :: Maybe (VU.Vector Float)
     , content :: [Text]
     , time :: Maybe UTCTime }
-    deriving (Eq, Show, Generic)
-
-instance Default Memory where
-    def = Memory
-        { id = Nothing
-        , vector = Nothing
-        , content = []
-        , time = Nothing }
+    deriving (Eq, Show, Generic, Default)
 
 instance ImmanantContent Memory where
     encodeImmanantContent m = "memory":[last m.content]

@@ -15,11 +15,11 @@ import Data.Aeson
       FromJSON(parseJSON),
       GFromJSON,
       Zero,
-      Options(omitNothingFields, fieldLabelModifier),
+      Options(..),
       Value(Array),
       GToJSON',
       KeyValue(..),
-      ToJSON(toJSON, toEncoding) )
+      ToJSON(toJSON, toEncoding), SumEncoding (..) )
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Parser, listEncoding)
 import Data.Aeson.Encoding (encodingToLazyByteString)
@@ -61,6 +61,7 @@ instance
 defaultAesonOps :: Aeson.Options
 defaultAesonOps = Aeson.defaultOptions
     { omitNothingFields = True
+    , sumEncoding = UntaggedValue
     , fieldLabelModifier = \case
         ('_':rs) -> rs
         name -> name }

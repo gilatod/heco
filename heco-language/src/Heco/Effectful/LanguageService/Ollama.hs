@@ -13,7 +13,7 @@ import Heco.Data.Model (ModelName(..))
 import Heco.Data.Role (Role(..))
 import Heco.Data.Message (Message(..), ToolCall(..), newAssistantMessage)
 import Heco.Data.LanguageError (LanguageError(LanguageBackendError, LanguageInputError))
-import Heco.Data.Embedding (Embedding(Embedding))
+import Heco.Data.Embedding (Embedding)
 import Heco.Data.FunctionSchema (FunctionSchema(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Effectful.HTTP (evalHttpManager)
@@ -34,6 +34,8 @@ import Network.HTTP.Client
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
+import Data.Text.Lazy qualified as TL
+
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
@@ -81,11 +83,18 @@ toOllamaToolCall t = OllamaToolCall
 
 toOllamaMessage :: Message -> OllamaMessage
 toOllamaMessage = \case
-    SystemMessage _ t -> OllamaMessage System t Nothing
-    UserMessage _ t -> OllamaMessage User t Nothing
-    ToolMessage _ _ -> OllamaMessage Tool "" Nothing
-    AssistantMessage _ t toolCalls ->
-        OllamaMessage Assistant t $ Just $ map toOllamaToolCall toolCalls
+    SystemMessage _ t -> OllamaMessage { role = System, content = t, tool_calls = Nothing }
+    UserMessage _ t -> OllamaMessage { role = User, content = t, tool_calls = Nothing }
+    ToolMessage _ _ -> OllamaMessage { role = Tool, content = "", tool_calls = Nothing }
+    AssistantMessage _ statement reasoning toolCalls -> OllamaMessage
+        { role = Assistant
+        , content =
+            if reasoning == ""
+                then statement
+                else TL.toStrict $
+                    "<think>\n" <> TL.fromStrict reasoning <> "\n</think>\n\n" <>
+                    TL.fromStrict statement
+        , tool_calls = Just $ map toOllamaToolCall toolCalls }
 
 data OllamaChatOps = OllamaChatOps
     { model :: Text
@@ -161,14 +170,14 @@ runOllamaLanguageService ops = reinterpret (evalHttpManager ops.timeout) \env ->
                                 let content = r.message.content
                                     builder' = builder <> T.encodeUtf8Builder content
                                 when (T.length content /= 0) $
-                                    unlift . trigger . OnUtteranceChunkReceived $ content
+                                    unlift . trigger . OnStatementChunkReceived $ content
                                 if r.done
                                     then pure . builderToText $ builder'
                                     else streamResponse builder' response
 
             withResponse req manager (streamResponse mempty)
 
-        msg <- newAssistantMessage resp []
+        msg <- newAssistantMessage resp "" []
         trigger $ OnMessageReceived msg
         pure msg
 

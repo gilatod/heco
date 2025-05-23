@@ -17,7 +17,7 @@ import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Proxy (Proxy(..))
-import Data.Typeable (Typeable, typeRepTyCon, tyConName, typeRep)
+import Data.Typeable (Typeable)
 
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import Pattern.Cast (Cast(..))
@@ -28,11 +28,15 @@ data LanguageToolSpec es = LanguageToolSpec
 
 data Param (name :: Symbol) t
 data ParamDesc (name :: Symbol) t (desc :: Symbol)
+data MaybeParam (name :: Symbol) t
+data MaybeParamDesc (name :: Symbol) t (desc :: Symbol)
 data Ret t
 
 type family LanguageHandler es f where
     LanguageHandler es (Param name t -> b) = t -> LanguageHandler es b
     LanguageHandler es (ParamDesc name t desc -> b) = t -> LanguageHandler es b
+    LanguageHandler es (MaybeParam name t -> b) = Maybe t -> LanguageHandler es b
+    LanguageHandler es (MaybeParamDesc name t desc -> b) = Maybe t -> LanguageHandler es b
     LanguageHandler es (Ret r) = Eff es r
 
 newtype LanguageTool es (name :: Symbol) (desc :: Symbol) handler = LanguageTool (LanguageHandler es handler)
@@ -66,11 +70,6 @@ throwArgInvalid key msg =
     throwError $ LanguageToolArgumentInvalid $
         "failed to parse argument '" ++ T.unpack key ++ "': " ++ msg
 
-isMaybeType :: forall t. Typeable t => Bool
-isMaybeType =
-    let conName = tyConName $ typeRepTyCon $ typeRep (Proxy :: Proxy t)
-    in conName == "Maybe"
-
 symbolText :: forall s. KnownSymbol s => Text
 symbolText = T.pack $ symbolVal (Proxy :: Proxy s)
 
@@ -84,7 +83,7 @@ instance
             { name = symbolText @pname
             , description = Nothing
             , schema = dataSchema @t
-            , optional = isMaybeType @t }
+            , optional = False }
         : languageToolPropertySchemas @es @(LanguageTool es name desc handler)
 
     invokeLanguageTool args (LanguageTool handler) =
@@ -102,13 +101,63 @@ instance
     ( Error LanguageToolError :> es
     , KnownSymbol pname, KnownSymbol pdesc, FromJSON t, Typeable t, HasDataSchema t
     , InvokableLanguageTool es (LanguageTool es name desc handler) )
+    => InvokableLanguageTool es (LanguageTool es name desc (MaybeParamDesc pname t pdesc -> handler)) where
+    languageToolPropertySchemas =
+        PropertySchema
+            { name = symbolText @pname
+            , description = Just $ symbolText @pdesc
+            , schema = dataSchema @t
+            , optional = False }
+        : languageToolPropertySchemas @es @(LanguageTool es name desc handler)
+
+    invokeLanguageTool args (LanguageTool handler) =
+        case HashMap.lookup paramKey args of
+            Nothing -> invokeLanguageTool args $
+                (LanguageTool (handler Nothing) :: LanguageTool es name desc handler)
+            Just value ->
+                case Aeson.fromJSON @t value of
+                    Aeson.Error err -> throwArgInvalid paramKey err
+                    Aeson.Success res -> invokeLanguageTool args $
+                        (LanguageTool (handler $ Just res) :: LanguageTool es name desc handler)
+        where
+            paramKey = symbolText @pname
+
+instance
+    ( Error LanguageToolError :> es
+    , KnownSymbol pname, FromJSON t, Typeable t, HasDataSchema t
+    , InvokableLanguageTool es (LanguageTool es name desc handler) )
+    => InvokableLanguageTool es (LanguageTool es name desc (MaybeParam pname t -> handler)) where
+    languageToolPropertySchemas =
+        PropertySchema
+            { name = symbolText @pname
+            , description = Nothing
+            , schema = dataSchema @t
+            , optional = False }
+        : languageToolPropertySchemas @es @(LanguageTool es name desc handler)
+
+    invokeLanguageTool args (LanguageTool handler) =
+        case HashMap.lookup paramKey args of
+            Nothing -> invokeLanguageTool args $
+                (LanguageTool (handler Nothing) :: LanguageTool es name desc handler)
+            Just value ->
+                case Aeson.fromJSON @t value of
+                    Aeson.Error err -> throwArgInvalid paramKey err
+                    Aeson.Success res -> invokeLanguageTool args $
+                        (LanguageTool (handler $ Just res) :: LanguageTool es name desc handler)
+        where
+            paramKey = symbolText @pname
+
+instance
+    ( Error LanguageToolError :> es
+    , KnownSymbol pname, KnownSymbol pdesc, FromJSON t, Typeable t, HasDataSchema t
+    , InvokableLanguageTool es (LanguageTool es name desc handler) )
     => InvokableLanguageTool es (LanguageTool es name desc (ParamDesc pname t pdesc -> handler)) where
     languageToolPropertySchemas =
         PropertySchema
             { name = symbolText @pname
             , description = Just $ symbolText @pdesc
             , schema = dataSchema @t
-            , optional = isMaybeType @t }
+            , optional = False }
         : languageToolPropertySchemas @es @(LanguageTool es name desc handler)
 
     invokeLanguageTool args (LanguageTool handler) =
@@ -120,7 +169,7 @@ instance
                     Aeson.Success res -> invokeLanguageTool args $
                         (LanguageTool (handler res) :: LanguageTool es name desc handler)
         where
-            paramKey = T.pack $ symbolVal (Proxy :: Proxy pname)
+            paramKey = symbolText @pname
 
 instance ToJSON r => InvokableLanguageTool es (LanguageTool es name desc (Ret r)) where
     languageToolPropertySchemas = []

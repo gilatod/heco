@@ -11,41 +11,42 @@ import Effectful.Dispatch.Dynamic (HasCallStack)
 
 import Data.Text (Text)
 import Data.Vector (Vector)
+import Data.Aeson (Object)
 
 data ChatOps = ChatOps
     { modelName :: ModelName
-    , providers :: Maybe [Text]
     , stream :: Bool
     , tools :: [FunctionSchema]
     , temperature :: Maybe Float
     , topP :: Maybe Float
     , maxToken :: Maybe Int
     , presencePenalty :: Maybe Float
-    , frequencyPenalty :: Maybe Float }
+    , frequencyPenalty :: Maybe Float
+    , extra :: Object }
 
 chatOps :: ModelName -> ChatOps
 chatOps name = ChatOps
     { modelName = name
-    , providers = Nothing
     , stream = True
     , tools = []
     , temperature = Nothing
     , topP = Nothing
     , maxToken = Nothing
     , presencePenalty = Nothing
-    , frequencyPenalty = Nothing }
+    , frequencyPenalty = Nothing
+    , extra = mempty }
 
 chatOpsNoStream :: ModelName -> ChatOps
 chatOpsNoStream name = ChatOps
     { modelName = name
-    , providers = Nothing
     , stream = False
     , tools = []
     , temperature = Nothing
     , topP = Nothing
     , maxToken = Nothing
     , presencePenalty = Nothing
-    , frequencyPenalty = Nothing }
+    , frequencyPenalty = Nothing
+    , extra = mempty }
 
 data LanguageService :: Effect where
     Chat :: ChatOps -> Vector Message -> LanguageService m Message

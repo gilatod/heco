@@ -8,7 +8,7 @@ import Heco.Effectful.InternalTimeStream (InternalTimeStream, presentOne_, getRe
 import Heco.Effectful.Ego (interactEgo, Ego)
 
 import Effectful (Eff, (:>), IOE)
-import Effectful.Concurrent (Concurrent, myThreadId, killThread)
+import Effectful.Concurrent (Concurrent)
 
 import Conduit (ConduitT, (.|), MonadIO(..))
 import Conduit qualified as C
@@ -20,7 +20,7 @@ import Data.Text.Lazy.IO qualified as TL
 import Data.Vector qualified as V
 
 import Control.Monad (unless)
-import System.Exit (exitWith, ExitCode (ExitSuccess))
+import Heco.Effectful.PortalService (PortalService, killPortal_)
 
 stdinLines :: MonadIO m => ConduitT i Text m ()
 stdinLines = do
@@ -33,29 +33,30 @@ shellPortal :: forall es.
     ( IOE :> es
     , Concurrent :> es
     , InternalTimeStream :> es
+    , PortalService :> es
     , Ego :> es )
     => Portal (Eff es)
 shellPortal = Portal
     { name = "shell"
     , procedure = procedure }
     where
-        procedure pid sigSrc = do
-            tid <- myThreadId
+        procedure pid sigSrc =
             C.runConduit $ mergeSources
                 (stdinLines .| handleUserInput pid)
-                (sigSrc .| handleSigSrc tid)
+                (sigSrc .| handleSigSrc pid)
 
         handleUserInput pid = C.awaitForever \case
             "/history" -> do
                 retention <- C.lift getRetention
                 V.forM_ retention $ liftIO . TL.putStrLn . format
             "/quit" -> do
-                liftIO $ exitWith ExitSuccess
+                C.lift $ killPortal_ pid
             s -> if T.head s == '/'
-                then liftIO $ putStrLn "Error: invalid command!"
+                then liftIO $ putStrLn $ "Error: invalid command "  <> T.unpack s
                 else C.lift $ interactEgo do
                     presentOne_ $ TerminalChat pid $ "User: " <> s
 
-        handleSigSrc tid = C.awaitForever \case
+        handleSigSrc pid = C.awaitForever \case
             PortalReply _ msg -> liftIO $ T.putStrLn msg
-            PortalClose -> C.lift $ killThread tid
+            PortalClose -> C.lift $ killPortal_ pid
+            _ -> pure ()

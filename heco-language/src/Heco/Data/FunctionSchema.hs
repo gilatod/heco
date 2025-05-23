@@ -315,7 +315,7 @@ encodeArraySpecKV s = mconcat
 encodeObjectSpecKV :: (KeyValue Encoding kv, Monoid kv) => ObjectSpec -> kv
 encodeObjectSpecKV s = mconcat
     [ "properties" .=. (pairs . mconcat . map encodePropertySchemaKV) s.properties
-    , "additionalProperties" .=. toEncoding s.additionalProperties
+    , "additionalProperties" .=. either toEncoding toEncoding s.additionalProperties
     , "required" .= (map (\s -> s.name) . filter (\s -> not s.optional)) s.properties ]
  
 encodePropertySchemaKV :: KeyValue Encoding kv => PropertySchema -> kv
@@ -667,7 +667,7 @@ instance
             in fields & map \r ->
                 let (fieldTypeRep, schema, desc) = r.extra
                 in PropertySchema
-                    { name = T.pack $ fieldLabelModifier $ r.name
+                    { name = T.pack $ fieldLabelModifier r.name
                     , description = desc
                     , schema = schema
                     , optional = tyConName (typeRepTyCon fieldTypeRep) == "Maybe" }

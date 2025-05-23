@@ -8,6 +8,7 @@ import Data.Text (Text)
 
 data PortalSignal
     = PortalReply TimePhase Text
+    | PortalTick
     | PortalClose
 
 type PortalSignalSource m = ConduitT () PortalSignal m ()

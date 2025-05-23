@@ -26,6 +26,9 @@ newtype EntityId = EntityId Int
     deriving (Show, Eq, Ord, Enum, Bounded)
     deriving newtype Hashable
 
+instance Default EntityId where
+    def = EntityId 0
+
 instance VU.Unboxable EntityId where
     type Rep EntityId = Int
 
@@ -34,19 +37,20 @@ deriveJSON defaultOptions ''EntityId
 instance Cast EntityId Int where
     cast (EntityId t) = t
 
-type IsEntityData e =
-    ( ToJSON e
-    , HasField "id" e (Maybe EntityId)
-    , HasField "vector" e (Maybe (VU.Vector Float)) )
-
 class
     ( Default e, Generic e
     , HasAesonOps e
-    , GToJSON' Value Zero (Rep e), FromJSON e
-    , IsEntityData e)
+    , GToJSON' Value Zero (Rep e)
+    , ToJSON e, FromJSON e
+    , HasField "id" e (Maybe EntityId) )
     => Entity e where
-    entityDataFields :: [Text]
-    entityDataFields = case genericToJSON (aesonOpsNotOmitNull @e) (def :: e) of
-        Object obj ->
-            filter (\t -> t /= "id" && t /= "vector") $ map K.toText (KM.keys obj)
+    entityNonDataFields :: [Text]
+    entityNonDataFields = ["vector", "sparse_vector"]
+
+entityDataFields :: forall e. Entity e => [Text]
+entityDataFields =
+    case genericToJSON (aesonOpsNotOmitNull @e) (def :: e) of
+        Object obj -> filter filterFunc $ map K.toText (KM.keys obj)
         _ -> []
+    where
+        filterFunc t = not $ elem t (entityNonDataFields @e)
