@@ -13,6 +13,8 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Aeson (Object)
 
+import Control.Monad (void)
+
 data ChatOps = ChatOps
     { modelName :: ModelName
     , stream :: Bool
@@ -57,12 +59,12 @@ makeEffect ''LanguageService
 
 chat_ :: (HasCallStack, LanguageService :> es)
     => ChatOps -> Vector Message -> Eff es ()
-chat_ model msgs = chat model msgs >> pure ()
+chat_ model msgs = void $ chat model msgs
 
 embed_ :: (HasCallStack, LanguageService :> es)
     => ModelName -> Text -> Eff es ()
-embed_ model text = embed model text >> pure ()
+embed_ model text = void $ embed model text
 
 embedMany_ :: (HasCallStack, LanguageService :> es)
     => ModelName -> Text -> Eff es ()
-embedMany_ model text = embed model text >> pure ()
+embedMany_ model text = void $ embed model text

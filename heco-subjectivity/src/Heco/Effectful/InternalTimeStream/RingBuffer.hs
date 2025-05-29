@@ -19,8 +19,9 @@ import Data.RingBuffer qualified as RingBuffer
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Control.Monad.Extra (whenJust)
+import Data.Functor ((<&>))
 
-data RingBufferOps = RingBufferOps
+newtype RingBufferOps = RingBufferOps
     { capacity :: Int }
 
 data ServiceState = ServiceState
@@ -58,7 +59,7 @@ runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
 
                     timePhase <- TimePhase.new mempty
                     pure (timePhase, uri)
-        `catchIO` (\e -> throwError . UnhandledInternalTimeStreamError $ displayException e)
+        `catchIO` (throwError . UnhandledInternalTimeStreamError . displayException)
 
     Present newContents -> do
         state <- ask @ServiceState
@@ -74,8 +75,7 @@ runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
     GetRetention -> do
         state <- ask @ServiceState
         -- TODO: performance!
-        liftIO (RingBuffer.toList state.retention)
-            >>= pure . V.reverse . V.fromList
+        liftIO (RingBuffer.toList state.retention) <&> (V.reverse . V.fromList)
 
     GetRetentionLength -> do
         state <- ask @ServiceState
@@ -84,6 +84,10 @@ runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
     GetRetentionCapacity -> do
         state <- ask @ServiceState
         pure $ RingBuffer.capacity state.retention
+
+    ClearRetention -> do
+        state <- ask @ServiceState
+        liftIO $ RingBuffer.clear state.retention
 
     where
         wrap e = do
@@ -100,5 +104,5 @@ runRingBufferInternalTimeStreamEx ::
     => RingBufferOps
     -> Eff (InternalTimeStream : Event InternalTimeStreamEvent : Error InternalTimeStreamError : es) a
     -> Eff es (Either (CallStack, InternalTimeStreamError) a)
-runRingBufferInternalTimeStreamEx ops = 
+runRingBufferInternalTimeStreamEx ops =
     runError . runEvent . runRingBufferInternalTimeStream ops

@@ -1,8 +1,8 @@
 module Heco.Effectful.Event where
 
-import Effectful (Effect, Eff, (:>), UnliftStrategy (ConcUnlift), Persistence (Persistent), Limit (Unlimited))
-import Effectful.Dispatch.Dynamic (reinterpret, localSeqUnlift, HasCallStack, localUnlift)
-import Effectful.State.Static.Shared (evalState, state, get, modify, State)
+import Effectful (Effect, Eff, (:>), UnliftStrategy (ConcUnlift), Persistence (Persistent), Limit (Unlimited), raise)
+import Effectful.Dispatch.Dynamic (reinterpret, HasCallStack, localUnlift)
+import Effectful.State.Static.Shared (evalState, state, get, modify, State, runState)
 import Effectful.TH (makeEffect)
 import Effectful.Exception (bracket)
 
@@ -10,6 +10,8 @@ import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
 import Data.Foldable (for_)
+
+import Control.Monad (void)
 
 newtype EventListenerHandle = EventListenerHandle Int
     deriving Eq
@@ -24,12 +26,20 @@ makeEffect ''Event
 
 listen_ :: (HasCallStack, Event e :> es)
     => (e -> Eff es ()) -> Eff es ()
-listen_ f = listen f >> pure ()
+listen_ f = void $ listen f
 
 on :: forall e es a.
     (HasCallStack, Event e :> es)
     => Eff es a -> (e -> Eff es ()) -> Eff es a
 on e f = bracket (listen f) (unlisten @e) (const e)
+
+collect :: forall e es a b.
+    (HasCallStack, Event e :> es)
+    => Eff es a -> (e -> Eff es b) -> Eff es (a, [b])
+collect m f = runState [] $
+    bracket (listen doCollect) (unlisten @e) (const $ raise m)
+    where
+        doCollect e = raise (f e) >>= modify . (:)
 
 withEvent :: forall e es a.
     (HasCallStack, Event e :> es)

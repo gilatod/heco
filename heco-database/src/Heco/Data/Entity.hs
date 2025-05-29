@@ -53,4 +53,4 @@ entityDataFields =
         Object obj -> filter filterFunc $ map K.toText (KM.keys obj)
         _ -> []
     where
-        filterFunc t = not $ elem t (entityNonDataFields @e)
+        filterFunc t = t `notElem` (entityNonDataFields @e)

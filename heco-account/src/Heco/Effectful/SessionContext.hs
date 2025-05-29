@@ -39,7 +39,7 @@ runSessionContext createCtx releaseCtx = reinterpret wrap \_ -> \case
             evalState emptyMap
             . withEvent \case
                 OnAccountLogout session -> modifyM \map -> do
-                    let (ctx, map') = HashMap.alterF (\ctx -> (ctx, Nothing)) session.token map
+                    let (ctx, map') = HashMap.alterF (, Nothing) session.token map
                     whenJust ctx $ raise . releaseCtx session
                     pure map'
                 _ -> pure ()

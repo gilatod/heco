@@ -8,25 +8,36 @@ import Heco.Data.FunctionSchema
     ( FieldDesc, HasDataSchema, RecordDefault )
 import Heco.Data.Default ()
 import Heco.Data.Aeson (HasAesonOps, AesonDefault(..))
-import Heco.Data.LanguageTool (LanguageTool(..), Param, Ret)
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.Portal.Shell (shellPortal)
 import Heco.Data.Portal.OneBot (makeOneBotPortal, OneBotOps(..))
+import Heco.Data.LanguageToolRegistry qualified as Registry
+import Heco.Effectful.DatabaseService
+    ( SearchOps(..) )
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Effectful.Exception (runThrowEither)
 import Heco.Effectful.Event (Event, runEvent)
-import Heco.Effectful.LanguageService (LanguageService(..))
-import Heco.Effectful.AccountService.Ldap (runLdapAccountServiceEx)
+import Heco.Effectful.LanguageService
+    ( LanguageService(..), ChatOps(..), chatOps )
+import Heco.Effectful.AccountService.Ldap
+    ( runLdapAccountServiceEx,
+      LdapOps(..),
+      LdapGroupAttributes(..),
+      LdapUserAttributes(..),
+      Host(..),
+      Dn(..),
+      Password(..),
+      LdapGroupMemberIdentification(..) )
 import Heco.Effectful.PrivilegeService (runSimplePrivilegeService)
-import Heco.Effectful.LanguageService.OpenAI (OpenAIOps(..), runOpenAILanguageService)
-import Heco.Effectful.LanguageService.Ollama (OllamaOps(..), runOllamaLanguageService)
-import Heco.Effectful.LanguageToolProvider.Native (runNativeLanguageToolProviderEx)
-import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx)
+import Heco.Effectful.LanguageService.OpenAI (OpenAIOps(..), runOpenAILanguageService, openaiOps)
+import Heco.Effectful.LanguageService.Ollama (OllamaOps(..))
+import Heco.Effectful.LanguageToolProvider.Native (runNativeLanguageToolProviderEx, modifyLangaugeToolRegistry)
+import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps(..), runRingBufferInternalTimeStreamEx)
-import Heco.Effectful.Ego.Heco (runHecoEgoEx)
+import Heco.Effectful.Ego.Heco
+    ( runHecoEgoEx, HecoOps(..), HecoMemoryOps(..), immanantContentXMLFormatter, hecoMemoryOps )
 import Heco.Effectful.PortalService (runStandardPortalService, runPortal_)
 import Heco.Agent.LanguageTools.Archives (archiveTools, ArchivesToolOps(..))
-import Heco.Agent.Options (makeHecoOps, makeOpenAIOps, ollamaOps, ldapOps, milvusOps)
 import Heco.Agent.AuthGroups (authGroups)
 
 import Effectful (runEff, Eff, IOE, (:>))
@@ -36,10 +47,11 @@ import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, send)
 import Effectful.Error.Dynamic (CallStack, Error, runError)
 import Effectful.Labeled (runLabeled, Labeled(Labeled))
 import Effectful.Resource (runResource)
-import Effectful.Reader.Dynamic (runReader)
 
 import Data.Text (Text)
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Text qualified as T
+import Data.Aeson (FromJSON, ToJSON, Value (Bool))
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Default (Default(..))
 
 import Control.Monad (forever)
@@ -50,15 +62,15 @@ runCombinedLanguageService ::
     => OpenAIOps -> OllamaOps
     -> Eff (LanguageService : Event LanguageEvent : Error LanguageError : es) a
     -> Eff es (Either (CallStack, LanguageError) a)
-runCombinedLanguageService openaiOps ollamaOps = 
+runCombinedLanguageService openaiOps ollamaOps =
     runError . runEvent . reinterpret evalInternal \_ -> \case
         Chat chatOps messages -> send $ Labeled @"openai" $ Chat chatOps messages
-        Embed modelName text -> send $ Labeled @"ollama" $ Embed modelName text
-        EmbedMany modelName texts -> send $ Labeled @"ollama" $ EmbedMany modelName texts
+        Embed modelName text -> send $ Labeled @"openai" $ Embed modelName text
+        EmbedMany modelName texts -> send $ Labeled @"openai" $ EmbedMany modelName texts
     where
         evalInternal =
             runLabeled @"openai" (runOpenAILanguageService openaiOps)
-            . runLabeled @"ollama" (runOllamaLanguageService ollamaOps)
+            -- . runLabeled @"openai" (runOllamaLanguageService ollamaOps)
 
 data Location = Location
     { name :: FieldDesc (Maybe Text) "Name of location, e.g. San Francisco, CA"
@@ -76,34 +88,86 @@ data Location = Location
 --     (ParamDesc "a" Float "First number" -> ParamDesc "b" Float "Second number" -> Ret Float)
 -- adderTool = LanguageTool \a b -> pure $ a + b
 
+ollamaOps :: OllamaOps
+ollamaOps = OllamaOps
+    { url = "http://127.0.0.1:11434"
+    , timeout = Nothing }
+
+makeOpenAIOps :: IO OpenAIOps
+makeOpenAIOps = do
+    token <- readFile "./tokens/ali.txt"
+    pure $ (openaiOps "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        { token = Just $ T.pack token }
+
+makeHecoOps :: IO HecoOps
+makeHecoOps = do
+    characterPrompt <- readFile "./prompts/characters/heco.md"
+    taskPrompt <- readFile "./prompts/task.md"
+    memorizingPrompt <- readFile "./prompts/memorize.md"
+    pure HecoOps
+        { characterPrompt = T.pack characterPrompt
+        , taskPrompt = T.pack taskPrompt
+        , memorizingPrompt = T.pack memorizingPrompt
+        , chatOps = (chatOps "qwen3-235b-a22b")
+            { extra = KeyMap.fromList
+                [("enable_thinking", Bool False)] }
+        , immanantContentFormatter = immanantContentXMLFormatter
+        , memoryOps = (hecoMemoryOps "memory" "text-embedding-v3")
+            { searchOps = def
+                { limit = Just 5
+                , radius = Just 0.05
+                , rangeFilter = Just 1 } }
+        , messageCacheLimit = Just 64 }
+
 runHecoAgent :: IO ()
 runHecoAgent = do
     hecoOps <- makeHecoOps
     openaiOps <- makeOpenAIOps
-    let run = runEff . runFailIO . runConcurrent . runResource
-            . runReader ArchivesToolOps
-                { embeddingModel = "bge-m3"
-                , collectionName = "archives" }
+
+    let runHeco = runEff . runFailIO . runConcurrent . runResource
             . runSimplePrivilegeService authGroups
             . runThrowEither . runCombinedLanguageService openaiOps ollamaOps
-            . runThrowEither . runLdapAccountServiceEx ldapOps
-            . runThrowEither . runMilvusDatabaseServiceEx milvusOps
-            . runThrowEither . runRingBufferInternalTimeStreamEx RingBufferOps { capacity = 20 }
+            . runThrowEither . runLdapAccountServiceEx LdapOps
+                { host = Tls "auth.gilatod.art" def
+                , port = 636
+                , domain = Dn "cn=readonly,dc=gilatod,dc=art"
+                , password = Password "readonly"
+                , userBase = Dn "ou=people,dc=gilatod,dc=art"
+                , userObjectClass = "posixAccount"
+                , userExtra = []
+                , userAttrs = LdapUserAttributes
+                    { username = "uid"
+                    , nickname = "displayName"
+                    , email = "mail" }
+                , groupBase = Dn "ou=groups,dc=gilatod,dc=art"
+                , groupObjectClass = "posixGroup"
+                , groupExtra = []
+                , groupAttrs = LdapGroupAttributes
+                    { name = "cn"
+                    , member = "uniqueMember" }
+                , groupMemberIdentification = GroupMemberIdentifiedByDn }
+            . runThrowEither . runMilvusDatabaseServiceEx MilvusOps
+                { url = "http://gilatod.local:19530/v2"
+                , timeout = Nothing
+                , token = Nothing
+                , database = Just "heco" }
+            . runThrowEither . runRingBufferInternalTimeStreamEx RingBufferOps
+                { capacity = 20 }
             . runThrowEither . runNativeLanguageToolProviderEx
-                archiveTools
             . runThrowEither . runHecoEgoEx hecoOps
             . runStandardPortalService
-    _ <- run do
-        -- embed "bge-m3" "介绍一下新艾利都" >>= liftIO . putStrLn . show
-        -- content <- liftIO $ readFile "test.csv"
-        -- let lineVec = V.fromList $ lines content
-        --     contents = V.map (cast . StatementAction . T.pack) lineVec
-        -- present_ contents
-        -- testChat
-        -- testHeco
+
+    _ <- runHeco do
+        modifyLangaugeToolRegistry $
+            Registry.addModule $
+                archiveTools ArchivesToolOps
+                    { embeddingModel = "text-embedding-v3"
+                    , collectionName = "archives" }
+
         runPortal_ shellPortal
         runPortal_ $ makeOneBotPortal def
             { webapiUrl = "http://gilatod.local:3000"
             , websocketHost = "gilatod.local" }
+
         forever $ threadDelay maxBound
     pure ()

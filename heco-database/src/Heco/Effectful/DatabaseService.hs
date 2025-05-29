@@ -13,7 +13,9 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector.Unboxing qualified as VU
 import Data.Default (Default(..))
+
 import GHC.Generics (Generic)
+import Control.Monad (void)
 
 data CollectionLoadState = CollectionLoadState
     { progress :: Int
@@ -75,7 +77,7 @@ data DatabaseService :: Effect where
     SetEntities :: Entity e => CollectionName -> Vector e -> DatabaseService m (VU.Vector EntityId)
     SetEntity :: Entity e => CollectionName -> e -> DatabaseService m EntityId
     GetEntities :: Entity e => CollectionName -> VU.Vector EntityId -> DatabaseService m (Vector e)
-    GetEntity :: Entity e => CollectionName -> EntityId -> DatabaseService m e
+    GetEntity :: Entity e => CollectionName -> EntityId -> DatabaseService m (Maybe e)
     QueryEntities :: Entity e => CollectionName -> QueryOps -> DatabaseService m (Vector e)
     SearchEntities :: Entity e => CollectionName -> SearchOps -> Vector SearchData -> DatabaseService m (Vector e)
     DeleteEntities :: CollectionName -> Text -> DatabaseService m ()
@@ -84,16 +86,16 @@ makeEffect ''DatabaseService
 
 addEntity_ :: (HasCallStack, DatabaseService :> es, Entity e)
     => CollectionName -> e -> Eff es ()
-addEntity_ c e = addEntity c e >> pure ()
+addEntity_ c e = void $ addEntity c e
 
 addEntities_ :: (HasCallStack, DatabaseService :> es, Entity e)
     => CollectionName -> Vector e -> Eff es ()
-addEntities_ c es = addEntities c es >> pure ()
+addEntities_ c es = void $ addEntities c es
 
 setEntity_ :: (HasCallStack, DatabaseService :> es, Entity e)
     => CollectionName -> e -> Eff es ()
-setEntity_ c e = setEntity c e >> pure ()
+setEntity_ c e = void $ setEntity c e
 
 setEntities_ :: (HasCallStack, DatabaseService :> es, Entity e)
     => CollectionName -> Vector e -> Eff es ()
-setEntities_ c es = setEntities c es >> pure ()
+setEntities_ c es = void $ setEntities c es

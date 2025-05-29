@@ -36,15 +36,11 @@ shellPortal :: forall es.
     , PortalService :> es
     , Ego :> es )
     => Portal (Eff es)
-shellPortal = Portal
-    { name = "shell"
-    , procedure = procedure }
+shellPortal = Portal "shell" \pid sigSrc ->
+    C.runConduit $ mergeSources
+        (stdinLines .| handleUserInput pid)
+        (sigSrc .| handleSigSrc pid)
     where
-        procedure pid sigSrc =
-            C.runConduit $ mergeSources
-                (stdinLines .| handleUserInput pid)
-                (sigSrc .| handleSigSrc pid)
-
         handleUserInput pid = C.awaitForever \case
             "/history" -> do
                 retention <- C.lift getRetention

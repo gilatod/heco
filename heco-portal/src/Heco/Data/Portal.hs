@@ -5,6 +5,7 @@ import Heco.Data.TimePhase (TimePhase)
 
 import Data.Conduit (ConduitT)
 import Data.Text (Text)
+import Effectful.Dispatch.Dynamic (HasCallStack)
 
 data PortalSignal
     = PortalReply TimePhase Text
@@ -12,7 +13,5 @@ data PortalSignal
     | PortalClose
 
 type PortalSignalSource m = ConduitT () PortalSignal m ()
-
-data Portal m = Portal
-    { name :: Text
-    , procedure :: TerminalId -> PortalSignalSource m -> m () }
+type PortalProcedure m = HasCallStack => TerminalId -> PortalSignalSource m -> m ()
+data Portal m = Portal Text (PortalProcedure m)

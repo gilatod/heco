@@ -44,6 +44,7 @@ library
   default-language: GHC2024
   hs-source-dirs: src
   exposed-modules:
+    Heco.Data.MonoHFunctor,
     Heco.Data.Aeson,
     Heco.Data.Aeson.TH,
     Heco.Data.Record,

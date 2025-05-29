@@ -7,32 +7,30 @@ module Heco.Effectful.LanguageService.OpenAI
     , runOpenAILanguageServiceEx
     ) where
 
-import Heco.Network.HTTP.Client (Headers)
+import Heco.Network.HTTP.Client
+    ( Headers, httpPost, httpRequestRaw )
 import Heco.Data.FunctionSchema (FunctionSchema(..))
 import Heco.Data.Aeson (defaultAesonOps)
 import Heco.Data.Model (ModelName(ModelName))
 import Heco.Data.Message (Message(..), ToolCall(..), ToolResponse(..), newAssistantMessage, messageUnique)
 import Heco.Data.LanguageError (LanguageError(..))
-import Heco.Data.Embedding (Embedding)
 import Heco.Data.Role (Role(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.Event (Event, trigger, runEvent)
 import Heco.Effectful.LanguageService (LanguageService(..), ChatOps(..))
 import Heco.Effectful.LanguageService.Common (unliftEventIO, relayError)
-import Heco.Network.HTTP.Client (httpPost, httpRequestRaw)
 
 import Effectful (Eff, (:>), IOE, MonadIO (liftIO), runEff)
 import Effectful.Dispatch.Dynamic (reinterpret)
 import Effectful.Error.Dynamic (Error, HasCallStack, throwError, runError, CallStack)
-import Effectful.Reader.Static (ask, Reader)
+import Effectful.Reader.Static (ask)
 import Effectful.State.Static.Local (evalState, State, state, modify)
 
 import Network.HTTP.Client
     ( withResponse,
       Response(responseBody),
       httpLbs,
-      Manager,
       BodyReader,
       brConsume )
 import Network.HTTP.Client.Conduit (bodyReaderSource)
@@ -58,7 +56,6 @@ import Data.Aeson (FromJSON(..), Object, Value (..))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.TH (deriveToJSON, deriveFromJSON, deriveJSON)
 
-import Data.Coerce (coerce)
 import Data.Function ((&))
 import Data.Maybe (fromMaybe)
 import Data.Default (Default(..))
@@ -88,7 +85,7 @@ openaiOps url = OpenAIOps
     , token = Nothing
     , messageCacheLimit = 64 }
 
-data OpenAIErrorMetadata = OpenAIErrorMetadata
+newtype OpenAIErrorMetadata = OpenAIErrorMetadata
     { raw :: Text }
     deriving (Show)
 
@@ -131,7 +128,7 @@ instance Default OpenAIMessage where
         , tool_call_id = Nothing
         , name = Nothing }
 
-data OpenAIChatChoice = OpenAIChatChoice
+newtype OpenAIChatChoice = OpenAIChatChoice
     { message :: OpenAIMessage }
     deriving (Show)
 
@@ -140,7 +137,7 @@ data OpenAIChatResp = OpenAIChatResp
     , error :: Maybe OpenAIError }
     deriving (Show)
 
-data OpenAIChatStreamChoice = OpenAIChatStreamChoice
+newtype OpenAIChatStreamChoice = OpenAIChatStreamChoice
     { delta :: OpenAIMessage }
     deriving (Show)
 
@@ -160,7 +157,7 @@ deriveFromJSON defaultAesonOps ''OpenAIChatStreamResp
 data OpenAIChatOps = OpenAIChatOps
     { model :: Text
     , messages :: Vector OpenAIMessage
-    , tools :: [FunctionSchema]
+    , tools :: Maybe [FunctionSchema]
     , stream :: Bool
     , temperature :: Maybe Float
     , top_p :: Maybe Float
@@ -175,7 +172,7 @@ data OpenAIEmbeddingOps = OpenAIEmbeddingOps
     , input :: Vector Text
     , encoding_format :: Text }
 
-data OpenAIEmbeddingData = OpenAIEmbeddingData
+newtype OpenAIEmbeddingData = OpenAIEmbeddingData
     { embedding :: VU.Vector Float }
 
 data OpenAIEmbeddingResp = OpenAIEmbeddingResp
@@ -190,7 +187,7 @@ type IsOpenAIResponse resp =
     ( FromJSON resp
     , HasField "error" resp (Maybe OpenAIError) )
 
-checkResponse :: 
+checkResponse ::
     IsOpenAIResponse resp
     => resp -> Maybe LanguageError
 checkResponse resp =
@@ -249,16 +246,16 @@ appendToolCalls delta v =
 
 parseToolCallArguments :: TL.Text -> HashMap Text Value
 parseToolCallArguments raw =
-    case Aeson.decode @Object $ BS.toLazyByteString $ TL.encodeUtf8Builder raw of
-        Nothing -> mempty
-        Just args -> KeyMap.toHashMapText args
+    maybe mempty KeyMap.toHashMapText
+        (Aeson.decode @Object
+            $ BS.toLazyByteString $ TL.encodeUtf8Builder raw)
 
 fromToolCallBuilder :: ToolCallBuilder -> ToolCall
 fromToolCallBuilder builder = ToolCall
     { id = TL.toStrict . TLB.toLazyText $ builder.id
     , name = TL.toStrict . TLB.toLazyText $ builder.name
     , arguments = parseToolCallArguments $ TLB.toLazyText builder.arguments }
- 
+
 fromCompleteOpenAIToolCall :: OpenAIToolCall -> ToolCall
 fromCompleteOpenAIToolCall toolCall =
     let OpenAIToolCall { id = id, function = f } = toolCall
@@ -317,7 +314,7 @@ handleChatResponse chatOps triggerEvent response = do
                 Just ("data", chunk) ->
                     if chunk == "[DONE]"
                         then pure state
-                        else (liftIO $ parseChunk state $ BSL.fromStrict chunk)
+                        else liftIO (parseChunk state $ BSL.fromStrict chunk)
                             >>= processLines
                 _ -> case Aeson.eitherDecode @OpenAIChatStreamResp $ BSL.fromStrict line of
                     Left _ -> processLines state
@@ -339,10 +336,10 @@ handleChatResponse chatOps triggerEvent response = do
                         pure state
                             { reasoning = state.reasoning <> T.encodeUtf8Builder reasoning
                             , statement = state.statement <> T.encodeUtf8Builder statement
-                            , toolCalls = maybe state.toolCalls (flip appendToolCalls state.toolCalls) delta.tool_calls }
+                            , toolCalls = maybe state.toolCalls (`appendToolCalls` state.toolCalls) delta.tool_calls }
                     _ -> throw $ LanguageBackendError "no message received"
 
-        parseFull bs = Aeson.eitherDecode @OpenAIChatResp bs & \case    
+        parseFull bs = Aeson.eitherDecode @OpenAIChatResp bs & \case
             Left e -> throw $ LanguageBackendError e
             Right r -> do
                 guardResponseIO r
@@ -359,30 +356,6 @@ handleChatResponse chatOps triggerEvent response = do
 
         onReasoningReceived = triggerEvent . OnReasoningChunkReceived
         onStatementReceived = triggerEvent . OnStatementChunkReceived
-
-embedImpl ::
-    ( HasCallStack
-    , IOE :> es
-    , Error LanguageError :> es
-    , Reader Manager :> es )
-    => OpenAIOps -> OpenAIEmbeddingOps -> Eff es (Vector Embedding)
-embedImpl ops req = do
-    manager <- ask
-    embeddingsRaw <-
-        (liftIO $ relayError do
-            req' <- httpPost (ops.url <> "/api/embed") [] req
-            responseBody <$> httpLbs req' manager)
-        >>= either throwError pure
-
-    case Aeson.eitherDecode @OpenAIEmbeddingResp embeddingsRaw of
-        Left e -> throwError $ LanguageBackendError e
-        Right r -> do
-            guardResponse r
-            case r._data of
-                Nothing -> throwError $ LanguageBackendError "embedding not received"
-                Just ds ->
-                    let embeddings = V.map (\d -> d.embedding) ds
-                    in pure $ coerce embeddings
 
 encodeMessage ::
     ( HasCallStack
@@ -418,7 +391,7 @@ encodeMessage msg = do
                 , reasoning = Just reasoning
                 , tool_calls = case toolCalls of
                     [] -> Nothing
-                    _ -> Just $ map encodeToolCall $ zip [0..] toolCalls }
+                    _ -> Just $ zipWith (curry encodeToolCall) [0..] toolCalls }
 
         encodeToolCall (i, t) = OpenAIToolCall
             { id = t.id
@@ -441,7 +414,9 @@ runOpenAILanguageService ops = reinterpret wrap \env -> \case
         let req = OpenAIChatOps
                 { model = cast chatOps.modelName
                 , messages = encodedMsgs
-                , tools = chatOps.tools
+                , tools = case chatOps.tools of
+                    [] -> Nothing
+                    ts -> Just ts
                 , stream = chatOps.stream
                 , temperature = chatOps.temperature
                 , top_p = chatOps.topP
@@ -485,6 +460,24 @@ runOpenAILanguageService ops = reinterpret wrap \env -> \case
             in evalHttpManager ops.timeout
                 . evalState (LRU.newLRU @Unique @OpenAIMessage msgCacheLimit)
 
+        embedImpl ops req = do
+            manager <- ask
+            embeddingsRaw <-
+                liftIO (relayError do
+                    req' <- httpPost (ops.url <> "/embeddings") headers req
+                    responseBody <$> httpLbs req' manager)
+                >>= either throwError pure
+
+            case Aeson.eitherDecode @OpenAIEmbeddingResp embeddingsRaw of
+                Left e -> throwError $ LanguageBackendError e
+                Right r -> do
+                    guardResponse r
+                    case r._data of
+                        Nothing -> throwError $ LanguageBackendError "embedding not received"
+                        Just ds -> do
+                            let embeddings = V.map (\d -> d.embedding) ds
+                            pure embeddings
+
         headers :: Headers
         headers = ("Content-Type", "application/json")
             : ("Accept", "application/json")
@@ -495,5 +488,5 @@ runOpenAILanguageServiceEx ::
     => OpenAIOps
     -> Eff (LanguageService : Event LanguageEvent : Error LanguageError : es) a
     -> Eff es (Either (CallStack, LanguageError) a)
-runOpenAILanguageServiceEx ops = 
+runOpenAILanguageServiceEx ops =
     runError . runEvent . runOpenAILanguageService ops

@@ -42,7 +42,8 @@ import Data.Default (Default(def))
 
 import GHC.Records (HasField)
 import Control.Exception (SomeException, catch, Exception(displayException))
-import Control.Monad (when)
+import Control.Monad (when, void)
+import Data.Maybe (fromMaybe)
 
 data MilvusOps = MilvusOps
     { url :: Text
@@ -81,7 +82,7 @@ data MilvusStatusResp = MilvusStatusResp
 deriveFromJSON defaultAesonOps ''MilvusStatusData
 deriveFromJSON defaultAesonOps ''MilvusStatusResp
 
-data MilvusGetStatsData = MilvusGetStatsData
+newtype MilvusGetStatsData = MilvusGetStatsData
     { rowCount :: Int }
 
 data MilvusGetStatsResp = MilvusGetStatsResp
@@ -97,7 +98,7 @@ data MilvusInsertOps e = MilvusInsertOps
     , collectionName :: Text
     , _data :: Vector e }
 
-data MilvusInsertData = MilvusInsertData
+newtype MilvusInsertData = MilvusInsertData
     { insertIds :: VU.Vector EntityId }
 
 data MilvusInsertResp = MilvusInsertResp
@@ -105,7 +106,7 @@ data MilvusInsertResp = MilvusInsertResp
     , message :: Maybe Text
     , _data :: Maybe MilvusInsertData }
 
-data MilvusUpsertData = MilvusUpsertData
+newtype MilvusUpsertData = MilvusUpsertData
     { upsertIds :: VU.Vector EntityId }
 
 data MilvusUpsertResp = MilvusUpsertResp
@@ -153,7 +154,7 @@ data MilvusSearchExtraParams = MilvusSearchExtraParams
     { radius :: Maybe Float
     , range_filter :: Maybe Float }
 
-data MilvusSearchParams = MilvusSearchParams
+newtype MilvusSearchParams = MilvusSearchParams
     { params :: MilvusSearchExtraParams }
 
 data MilvusSearchOps = MilvusSearchOps
@@ -193,7 +194,7 @@ throwErrorCode code msg =
 
 throwInvalidResponseError :: (HasCallStack, Error DatabaseError :> es) => Eff es a
 throwInvalidResponseError =
-    throwError $ DatabaseBackendError $ "invalid response"
+    throwError $ DatabaseBackendError "invalid response"
 
 throwInvalidResponseErrorCode :: (HasCallStack, Error DatabaseError :> es) => Int -> Eff es a
 throwInvalidResponseErrorCode code =
@@ -237,10 +238,10 @@ milvusPost :: forall resp req es.
 milvusPost ops url req = do
     manager <- ask
     response <-
-        (liftIO $ relayError do
+        liftIO (relayError do
             req' <- httpPost (ops.url <> url) headers req
             responseBody <$> httpLbs req' manager)
-        >>= either throwError pure 
+        >>= either throwError pure
 
     case Aeson.eitherDecode @resp response of
         Left e -> throwError $ DatabaseBackendError e
@@ -256,12 +257,11 @@ collectionRequest ::
     , Reader Manager :> es
     , Error DatabaseError :> es )
     => MilvusOps -> Text -> CollectionName -> Eff es resp
-collectionRequest ops url (CollectionName col) = do
-    resp <- milvusPost ops url
+collectionRequest ops url (CollectionName col) =
+    milvusPost ops url
         MilvusCollectionOps
             { dbName = ops.database
             , collectionName = col }
-    pure resp
 
 collectionRequest_ ::
     ( HasCallStack
@@ -270,7 +270,7 @@ collectionRequest_ ::
     , Error DatabaseError :> es )
     => MilvusOps -> Text -> CollectionName -> Eff es ()
 collectionRequest_ ops url col =
-    collectionRequest @MilvusCollectionResp ops url col >> pure ()
+    void $ collectionRequest @MilvusCollectionResp ops url col
 
 setEntitiesImpl ::
     ( HasCallStack
@@ -309,7 +309,7 @@ getEntitiesImpl ops (CollectionName col) ids = do
             , id = ids
             , outputFields = entityDataFields @e }
     case resp._data of
-        Nothing -> throwInvalidResponseError
+        Nothing -> pure V.empty
         Just es -> pure es
 
 runMilvusDatabaseService ::
@@ -346,14 +346,14 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
             Just d -> pure CollectionLoadState
                 { state = d.loadState
                 , progress = d.loadProgress
-                , message = maybe "" id d.message }
+                , message = fromMaybe "" d.message }
 
     GetEntityCount col -> do
         resp <- collectionRequest @MilvusGetStatsResp ops "/vectordb/collections/get_stats" col
         case resp._data of
             Nothing -> throwInvalidResponseError
             Just d -> pure d.rowCount
-    
+
     CreateEntity @e col -> do
         r <- setEntitiesImpl @e ops insertionUrl col getInsertDataIds $ V.singleton def
         if VU.length r == 0
@@ -388,8 +388,8 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
     GetEntity col id -> do
         r <- getEntitiesImpl ops col $ VU.singleton id
         if V.length r == 0
-            then throwInvalidResponseError
-            else pure $ r V.! 0
+            then pure Nothing
+            else pure $ Just $ r V.! 0
 
     QueryEntities @e (CollectionName col) queryOps -> do
         resp <- milvusPost @(MilvusGetResp e) ops "/vectordb/entities/query"
@@ -400,9 +400,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
                 , limit = queryOps.limit
                 , offset = queryOps.offset
                 , outputFields = entityDataFields @e }
-        case resp._data of
-            Nothing -> throwInvalidResponseError
-            Just es -> pure es
+        maybe throwInvalidResponseError pure resp._data
 
     SearchEntities @e (CollectionName col) searchOps searchData -> do
         resp <- milvusPost @(MilvusGetResp e) ops "/vectordb/entities/search"
@@ -416,9 +414,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
                 , limit = searchOps.limit
                 , offset = searchOps.offset
                 , outputFields = entityDataFields @e }
-        case resp._data of
-            Nothing -> throwInvalidResponseError
-            Just es -> pure es
+        maybe throwInvalidResponseError pure resp._data
 
     DeleteEntities (CollectionName col) filter -> do
         _ <- milvusPost @MilvusCollectionResp ops "/vectordb/entities/delete"
@@ -437,5 +433,5 @@ runMilvusDatabaseServiceEx ::
     => MilvusOps
     -> Eff (DatabaseService : Event DatabaseEvent : Error DatabaseError : es) a
     -> Eff es (Either (CallStack, DatabaseError) a)
-runMilvusDatabaseServiceEx ops = 
+runMilvusDatabaseServiceEx ops =
     runError . runEvent . runMilvusDatabaseService ops

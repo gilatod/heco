@@ -39,7 +39,6 @@ import Data.Text.Lazy qualified as TL
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
-import Data.Coerce (coerce)
 import Data.HashMap.Strict (HashMap)
 
 import Data.ByteString qualified as BS
@@ -67,7 +66,7 @@ data OllamaFunctionToolCall = OllamaFunctionToolCall
     { name :: Text
     , arguments :: Maybe (HashMap Text Value) }
 
-data OllamaToolCall = OllamaToolCall
+newtype OllamaToolCall = OllamaToolCall
     { function :: OllamaFunctionToolCall }
 
 data OllamaMessage = OllamaMessage
@@ -116,7 +115,7 @@ data OllamaEmbeddingOps = OllamaEmbeddingOps
     { model :: Text
     , input :: Vector Text }
 
-data OllamaEmbeddingResp = OllamaEmbeddingResp
+newtype OllamaEmbeddingResp = OllamaEmbeddingResp
     { embeddings :: Vector (VU.Vector Float) }
 
 deriveToJSON defaultAesonOps ''OllamaEmbeddingOps
@@ -131,7 +130,7 @@ embedImpl ::
 embedImpl ops req = do
     manager <- ask
     embeddingsRaw <-
-        (liftIO $ relayError do
+        liftIO (relayError do
             req' <- httpPost (ops.url <> "/api/embed") [] req
             responseBody <$> httpLbs req' manager)
         >>= either throwError pure
@@ -141,7 +140,7 @@ embedImpl ops req = do
         Right (OllamaEmbeddingResp { embeddings = embeddings }) ->
             if V.length embeddings == 0
                 then throwError $ LanguageBackendError "embedding not received"
-                else pure $ coerce embeddings
+                else pure embeddings
 
 runOllamaLanguageService ::
     (HasCallStack, IOE :> es, Event LanguageEvent :> es, Error LanguageError :> es)
@@ -203,5 +202,5 @@ runOllamaLanguageServiceEx ::
     => OllamaOps
     -> Eff (LanguageService : Event LanguageEvent : Error LanguageError : es) a
     -> Eff es (Either (CallStack, LanguageError) a)
-runOllamaLanguageServiceEx ops = 
+runOllamaLanguageServiceEx ops =
     runError . runEvent . runOllamaLanguageService ops

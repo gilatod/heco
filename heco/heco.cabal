@@ -45,12 +45,13 @@ library
   hs-source-dirs: src
   exposed-modules:
     Heco.Effectful.Ego.Heco,
-    Heco.Agent.Options,
     Heco.Agent.AuthGroups,
     Heco.Agent.LanguageTools.Archives,
+    Heco.Agent.LanguageTools.Downloader,
     Heco.Agent
   build-depends:
     base,
+    extra,
     effectful,
     effectful-core,
     resourcet-effectful,
@@ -67,7 +68,6 @@ library
     PyF,
     time,
     lrucache,
-    xml-conduit,
     log-base,
     log-effectful,
     heco-common,

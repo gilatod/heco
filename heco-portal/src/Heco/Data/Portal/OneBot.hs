@@ -8,14 +8,14 @@ import Heco.Data.TimePhase (ImmanantContent)
 import Heco.Data.TimePhase qualified as TimePhase
 import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Effectful.HTTP (makeHttpManager)
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, present_)
+import Heco.Effectful.InternalTimeStream (InternalTimeStream, present_, clearRetention, getRetention)
 import Heco.Effectful.Ego (Ego, interactEgo)
 
 import Effectful (Eff, IOE, type (:>), MonadIO(..))
 import Effectful.Concurrent (Concurrent, myThreadId, killThread)
 import Effectful.Resource (Resource)
 
-import Conduit (ConduitT, (.|), MonadResource(..))
+import Conduit (ConduitT, (.|))
 import Conduit qualified as C
 
 import Network.Socket qualified as S
@@ -36,13 +36,15 @@ import Data.Text.Lazy.Builder qualified as TLB
 import Data.Text.Lazy.Builder.Int qualified as TLB
 import Data.Maybe (fromMaybe)
 import Data.Vector qualified as V
+import Data.Char (isSpace)
 import Data.Default (Default(..), def)
 
 import System.Timeout (timeout)
 import Control.Exception (throwIO)
-import Control.Monad.Extra (whenJust)
+import Control.Monad.Extra (whenJust, void)
 import Pattern.Cast (cast)
 import GHC.Generics (Generic)
+import GHC.Stack.Types (HasCallStack)
 
 data OneBotOps = OneBotOps
     { webapiUrl :: Text
@@ -109,7 +111,9 @@ deriveFromJSON defaultAesonOps ''OneBotSender
 deriveFromJSON defaultAesonOps ''OneBotEvent
 deriveToJSON defaultAesonOps ''OneBotSendingMessage
 
-oneBotWebsocketSource :: MonadResource m => OneBotOps -> ConduitT i OneBotEvent m ()
+oneBotWebsocketSource ::
+    (HasCallStack, C.MonadResource m)
+    => OneBotOps -> ConduitT i OneBotEvent m ()
 oneBotWebsocketSource ops = do
     addrs <- liftIO $
         S.getAddrInfo
@@ -159,51 +163,66 @@ makeOneBotPortal :: forall es.
     , InternalTimeStream :> es
     , Ego :> es )
     => OneBotOps -> Portal (Eff es)
-makeOneBotPortal ops = Portal
-    { name = "onebot"
-    , procedure = procedure }
+makeOneBotPortal ops = Portal "onebot" \pid sigSrc -> do
+    tid <- myThreadId
+    httpMgr <- liftIO $ makeHttpManager ops.webapiTimeout
+    C.runConduit $ mergeSources
+        (oneBotWebsocketSource ops .| readEvent pid httpMgr)
+        (sigSrc .| handleSigSrc tid httpMgr)
     where
-        procedure pid sigSrc = do
-            tid <- myThreadId
-            httpMgr <- liftIO $ makeHttpManager ops.webapiTimeout
-            C.runConduit $ mergeSources
-                (oneBotWebsocketSource ops .| readEvent pid)
-                (sigSrc .| handleSigSrc tid httpMgr)
-
-        readEvent pid = C.awaitForever \e -> do
+        readEvent pid httpMgr = C.awaitForever \e -> do
             let username = e.sender.nickname
-                doPresent = presentMessage pid username e
+                doPresent = C.lift . presentMessage pid httpMgr username e
             case e.message of
                 parts | e.message_type == "private" -> doPresent parts
                 headPart:parts | isAtMessage e.self_id headPart -> doPresent parts
                 _ -> pure ()
 
-        presentMessage pid user event parts = do
-            let builder = mconcat $ map (\m -> maybe mempty TLB.fromText m._data.text) parts
-                text = TL.toStrict $ TLB.toLazyText $
-                    "[onebot] " <> TLB.fromText user <>  ": " <>  builder
-            liftIO $ T.putStrLn text
-            C.lift $ interactEgo do
-                present_ $ V.fromList
-                    [ cast $ TerminalChat pid text
-                    , cast event ]
+        presentMessage pid httpMgr user event parts = do
+            let content = mconcat $ map (\m -> maybe mempty TL.fromStrict m._data.text) parts
+                msg = TL.toStrict $ TL.fromStrict user <>  ": " <> content
+            liftIO $ T.putStrLn msg
+            if TL.length content > 0 && TL.head content == '/'
+                then handleCommands httpMgr event $
+                    TL.toStrict $ TL.dropWhile isSpace content
+                else interactEgo do
+                    present_ $ V.fromList
+                        [ cast $ TerminalChat pid msg
+                        , cast event ]
 
         isAtMessage selfId headPart =
-            headPart._type == "at" &&
+            headPart._type == "at"  &&
                 case maybe (Left "") T.decimal headPart._data.qq of
                     Left _ -> False
                     Right (qq, _) -> qq == selfId
+ 
+        handleCommands httpMgr event = \case
+            "/clear" -> do
+                clearRetention
+                respond httpMgr event "意识流清空完毕。"
+            "/history" -> do
+                retention <- getRetention
+                if V.null retention
+                    then respond httpMgr event "当前无历史记录。"
+                    else do
+                        let history = V.foldl1 mappend $ V.map ((<> "\n"). TimePhase.format) retention
+                        respond httpMgr event $ TL.toStrict history
+            cmd -> do
+                respond httpMgr event $ "未知的命令：" <> cmd
 
         handleSigSrc tid httpMgr = C.awaitForever \case
             PortalReply phase msg -> do
                 whenJust (TimePhase.getImmanantContent @OneBotEvent phase) \event -> do
                     liftIO $ T.putStrLn $ "[onebot] " <> event.message_type <> " / " <> msg
-                    let (path, resp) = makeResponseMessage event msg
-                    whenJust resp \r -> do
-                        req <- liftIO $ httpPost (ops.webapiUrl <> path) apiHeaders r
-                        liftIO (httpLbs req httpMgr) >> pure ()
+                    C.lift $ respond httpMgr event msg
             PortalClose -> C.lift $ killThread tid
             _ -> pure ()
+        
+        respond httpMgr event msg = do
+            let (path, resp) = makeResponseMessage event msg
+            whenJust resp \r -> do
+                req <- liftIO $ httpPost (ops.webapiUrl <> path) apiHeaders r
+                void $ liftIO $ httpLbs req httpMgr
 
         makeResponseMessage event msg =
             case event.message_type of

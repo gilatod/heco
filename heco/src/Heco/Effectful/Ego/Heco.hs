@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Heco.Effectful.Ego.Heco where
 
@@ -10,24 +11,23 @@ import Heco.Data.TimePhase
       ImmanantContent(..),
       AnyImmanantContent(AnyImmanantContent),
       joinImmanantContent, castImmanantContent )
-import Heco.Data.Immanant.Memory (Memory(..), anyImmanantContentToMemory)
-import Heco.Data.Immanant.Terminal (Terminal(..), TerminalId (TerminalId))
+import Heco.Data.Immanant.Memory (Memory(..))
+import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Data.Collection (CollectionName)
-import Heco.Data.Message (Message(..), newUserMessage, newSystemMessage, newToolMessage, ToolCall(..), ToolResponse(..))
+import Heco.Data.Message (Message(..), newUserMessage, newSystemMessage, newToolMessage, ToolCall(..), ToolResponse(..), messageText)
 import Heco.Data.LanguageError (LanguageError)
 import Heco.Data.EgoError (EgoError(..))
+import Heco.Data.TimePhase qualified as TimePhase
 import Heco.Events.EgoEvent (EgoEvent(..))
 import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(OnTimePhaseLost))
-import Heco.Effectful.Event (Event, trigger, runEvent, on)
+import Heco.Effectful.Event (Event, trigger, runEvent, collect)
 import Heco.Effectful.DatabaseService
     ( SearchOps(..),
       DatabaseService,
-      searchEntities,
-      loadCollection,
-      addEntities_, SearchData (DenseVectorData) )
+      searchEntities, SearchData (DenseVectorData), addEntity_ )
 import Heco.Effectful.LanguageService
-    ( chat, embed, embedMany, ChatOps(..), LanguageService )
-import Heco.Effectful.LanguageToolProvider (LanguageToolProvider, invokeLanguageTool, getLanguageTools)
+    ( chat, embed, ChatOps(..), LanguageService )
+import Heco.Effectful.LanguageToolProvider (LanguageToolProvider, getLanguageToolSchemas, invokeLanguageTool)
 import Heco.Effectful.InternalTimeStream
     ( InternalTimeStream,
       present_,
@@ -47,7 +47,6 @@ import Effectful.Concurrent.QSem (QSem, waitQSem, signalQSem, newQSem)
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Read qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TLB
 
@@ -58,22 +57,19 @@ import Data.Vector.Mutable qualified as VM
 
 import Data.Default (def)
 import Data.List (intersperse)
-import Data.Coerce (coerce)
-import Data.Maybe (isNothing)
 import Data.Time (getCurrentTime)
 import Data.Function ((&))
 import Data.Cache.LRU (LRU)
 import Data.Cache.LRU qualified as LRU
 import Data.Unique (Unique)
 import Data.Tuple (swap)
-import Data.Map qualified as Map
-import Data.Maybe (mapMaybe)
-
-import Control.Monad (when, forM, forM_)
-import Pattern.Cast (Cast(cast))
-
-import Text.XML qualified as XML
 import Data.String (IsString(fromString))
+import Data.Aeson.QQ (aesonQQ)
+import Data.Char (isSpace)
+
+import Control.Monad (forM, unless, (>=>))
+import Control.Monad.Extra (whenJustM)
+import Pattern.Cast (Cast(cast))
 
 data HecoMemoryOps = HecoMemoryOps
     { collectionName :: CollectionName
@@ -89,17 +85,22 @@ hecoMemoryOps c m = HecoMemoryOps
 data HecoOps = HecoOps
     { characterPrompt :: Text
     , taskPrompt :: Text
+    , memorizingPrompt :: Text
     , chatOps :: ChatOps
     , memoryOps :: HecoMemoryOps
     , immanantContentFormatter :: AnyImmanantContent -> TLB.Builder
     , messageCacheLimit :: Maybe Int }
+
+data HecoInternal = HecoInternal
+    { initialMessage :: Message
+    , memorizingPrompt :: Text }
 
 immanantContentXMLFormatter :: AnyImmanantContent -> TLB.Builder
 immanantContentXMLFormatter (AnyImmanantContent c) =
     case encodeImmanantContent c of
         [] -> mempty
         [c] -> "<" <> TLB.fromText c <> xmlAttrs <> "/>"
-        c:cs -> 
+        c:cs ->
             let cb = TLB.fromText c
             in "<" <> cb <> xmlAttrs <> ">\n"
             <> mconcat (intersperse ":" $ map TLB.fromText cs)
@@ -116,25 +117,6 @@ embedImmanantContent ::
     => HecoOps -> AnyImmanantContent -> Eff es Embedding
 embedImmanantContent ops (AnyImmanantContent mem) = do
     embed ops.memoryOps.embeddingModel $ joinImmanantContent ":" mem
-
-memorizeImmanantContents ::
-    ( HasCallStack
-    , IOE :> es
-    , DatabaseService :> es
-    , LanguageService :> es )
-    => HecoOps -> Vector AnyImmanantContent -> Eff es ()
-memorizeImmanantContents ops contents = do
-    let mems = V.mapMaybe anyImmanantContentToMemory contents
-        newMems = V.filter (\ent -> isNothing ent.id) mems
-
-    when (V.length newMems /= 0) do
-        time <- liftIO getCurrentTime
-        embeddings <- embedMany ops.memoryOps.embeddingModel $
-            newMems & V.map \mem -> T.concat $ intersperse ":" mem.content
-        addEntities_ ops.memoryOps.collectionName $
-            newMems & V.imap \i mem -> mem
-                { time = Just time
-                , vector = Just $ coerce $ embeddings V.! i }
 
 formatImmanantContents ::
     HecoOps -> Vector AnyImmanantContent -> TLB.Builder
@@ -184,14 +166,9 @@ associateMemory ops = do
         else do
             let memoryOps = ops.memoryOps
                 collection = memoryOps.collectionName
-
-            loadCollection collection
-            embeddings <- contents & traverse \c ->
-                embedImmanantContent ops c >>= pure . DenseVectorData
+            embeddings <- contents & traverse (embedImmanantContent ops >=> (pure . DenseVectorData))
             memEnts <- searchEntities @Memory collection memoryOps.searchOps embeddings
-
-            let nubbedEnts = V.nubBy (\a b -> compare a.id b.id) memEnts
-            pure $ V.map cast nubbedEnts
+            pure $ V.map cast $ V.nubBy (\a b -> compare a.id b.id) memEnts
 
 injectMemory ::
     ( HasCallStack
@@ -200,32 +177,6 @@ injectMemory ::
     , InternalTimeStream :> es )
     => HecoOps -> Eff es ()
 injectMemory ops = associateMemory ops >>= present_
-
-parseReplies :: Text -> [(TerminalId, Text)]
-parseReplies msg =
-    case XML.parseText def $ "<msg>" <> TL.fromStrict msg <> "</msg>" of
-        Left _ -> []
-        Right doc ->
-            let nodes = XML.elementNodes $ XML.documentRoot doc
-            in mapMaybe parseRootNodes nodes
-    where
-        parseRootNodes = \case
-            XML.NodeElement node ->
-                case XML.nameLocalName $ XML.elementName node of
-                    "reply" -> parseReplyNode node
-                    _ -> Nothing
-            _ -> Nothing
-
-        parseReplyNode node =
-            let session = Map.lookup "session" $ XML.elementAttributes node
-            in case XML.elementNodes node of
-                [XML.NodeContent content] ->
-                    case T.decimal <$> session of
-                        Just (Right (id, _)) -> Just (TerminalId id, content)
-                        _ -> Nothing
-                XML.NodeElement subnode:_ -> parseReplyNode subnode
-                _:XML.NodeElement subnode:_ -> parseReplyNode subnode
-                _ -> Nothing
 
 wrapInteraction ::
     ( HasCallStack
@@ -236,24 +187,31 @@ wrapInteraction ::
     , LanguageToolProvider :> es
     , InternalTimeStream :> es
     , State (LRU Unique Message) :> es
-    , Reader Message :> es
+    , Reader HecoInternal :> es
     , Reader QSem :> es
     , Event EgoEvent :> es
+    , Event InternalTimeStreamEvent :> es
     , Error LanguageError :> es
     , Error EgoError :> es )
     => HecoOps -> Eff es a -> Eff es a
-wrapInteraction ops eff = 
-    startInteraction >> finally eff finalizeInteraction
+wrapInteraction ops eff = do
+    startInteraction
+    flip finally finalizeInteraction do
+        (res, lostPhases) <- eff `collect` \case
+            OnTimePhaseLost timePhase -> pure $ Just timePhase
+            _ -> pure Nothing
+        respond lostPhases
+        pure res
     where
         startInteraction = do
             ask @QSem >>= waitQSem
             progressPresent_
             trigger OnEgoInteractionStarted
 
-        finalizeInteraction = do
+        respond lostPhases1 = do
             injectMemory ops
 
-            initialPrompt <- ask @Message
+            internal <- ask @HecoInternal
             retention <- getRetention
             present <- getPresent
             retentionMessages <- traverse (timePhaseToMessasge ops) retention
@@ -261,21 +219,74 @@ wrapInteraction ops eff =
 
             let retentionCount = V.length retention
                 messages = V.create do
-                    messages <- VM.new $ retentionCount + 2
-                    VM.write messages 0 initialPrompt
-                    V.iforM_ retentionMessages \i msg -> VM.write messages (i + 1) msg
-                    VM.write messages (retentionCount + 1) presentMessage
-                    pure messages
+                    let fstElem = if retentionCount /= 0
+                            then Just $ retentionMessages V.! 0
+                            else Nothing
+                    case fstElem of
+                        Just (ToolMessage _ _) -> do
+                            messages <- VM.new $ retentionCount + 1
+                            V.iforM_ retentionMessages $ VM.write messages
+                            VM.write messages 0 internal.initialMessage
+                            VM.write messages retentionCount presentMessage
+                            pure messages
+                        _ -> do
+                            messages <- VM.new $ retentionCount + 2
+                            VM.write messages 0 internal.initialMessage
+                            V.iforM_ retentionMessages \i msg -> VM.write messages (i + 1) msg
+                            VM.write messages (retentionCount + 1) presentMessage
+                            pure messages
 
             trigger $ OnEgoInputMessagesGenerated messages
 
-            tools <- getLanguageTools
-            msg <- runReader present case ops.chatOps.tools of
-                [] -> doChat (ops.chatOps { tools = tools }) messages
-                ts -> doChat (ops.chatOps { tools = tools ++ ts }) messages
+            schemas <- getLanguageToolSchemas
+            let chatOps = ops.chatOps { tools = schemas ++ ops.chatOps.tools }
+
+            ((msg, prevMsgs), lostPhases2) <-
+                runReader (Just present) $ doChat chatOps messages
+                    `collect` \case
+                        OnTimePhaseLost timePhase -> pure $ Just timePhase
+                        _ -> pure Nothing
+
+            let lostPhases = lostPhases1 ++ lostPhases2
+            unless (null lostPhases) do
+                runReader (Nothing :: Maybe TimePhase) $ runReader chatOps $
+                    memorizeLostPhases
+                        internal.memorizingPrompt (prevMsgs <> V.singleton msg) lostPhases
 
             trigger $ OnEgoInteractionCompleted msg
+
+        finalizeInteraction = do
             ask @QSem >>= signalQSem
+
+        memorizeLostPhases _ _ [] = pure ()
+        memorizeLostPhases prompt msgs (Nothing:restPhases) = memorizeLostPhases prompt msgs restPhases
+        memorizeLostPhases prompt msgs (Just timePhase:restPhases) = do
+            phaseMsg <- timePhaseToMessasge ops timePhase
+            case phaseMsg of
+                UserMessage _ text -> do
+                    memorizeText prompt msgs text
+                    memorizeLostPhases prompt msgs restPhases
+                AssistantMessage _ statement reasoning _ -> do
+                    memorizeText prompt msgs statement
+                    memorizeText prompt msgs reasoning
+                    memorizeLostPhases prompt msgs restPhases
+                _ -> do
+                    memorizeLostPhases prompt msgs restPhases
+
+        memorizeText prompt prevMsgs content = do
+            promptMsg <- newUserMessage $ prompt <> "\n" <> content
+            chatOps <- ask @ChatOps
+            (msg, _) <- doChat chatOps $ prevMsgs <> V.singleton promptMsg
+
+            let summary = messageText msg
+            embedding <- embed ops.memoryOps.embeddingModel summary
+            time <- liftIO getCurrentTime
+
+            addEntity_ ops.memoryOps.collectionName Memory
+                { id = Nothing
+                , vector = Just embedding
+                , content = summary
+                , metadata = Just [aesonQQ|{ create_time: #{time} }|] }
 
         doChat chatOps messages = do
             res <- (Right <$> chat chatOps messages)
@@ -286,18 +297,20 @@ wrapInteraction ops eff =
                     liftIO $ putStrLn "Error found, retrying..."
                     doChat chatOps messages
                 Right msg -> do
-                    progressPresent_
-                    presentOne_ $ TerminalReply msg
-                    progressPresent_
+                    whenJustM (ask @(Maybe TimePhase)) $ const do
+                        progressPresent_
+                        presentOne_ $ TerminalReply msg
+                        progressPresent_
                     handleReceivedMsg chatOps messages msg
 
         handleReceivedMsg chatOps messages = \case
             msg@(AssistantMessage _ statement _ []) -> do
                 sendReplyEvents statement
-                pure msg
-                
+                pure (msg, messages)
+
             msg@(AssistantMessage _ statement _ toolCalls) -> do
-                sendReplyEvents statement
+                unless (T.all isSpace statement) do
+                    sendReplyEvents statement
                 respMsgs <- forM toolCalls \t -> do
                     result <- invokeLanguageTool t.name t.arguments
                     let resp = ToolResponse
@@ -306,18 +319,20 @@ wrapInteraction ops eff =
                             , content = either (fromString . displayException) id result }
                     trigger $ OnEgoToolUsed t resp
                     toolMsg <- newToolMessage resp
-                    presentOne_ $ TerminalReply toolMsg
-                    progressPresent_
+                    whenJustM (ask @(Maybe TimePhase)) $ const do
+                        presentOne_ $ TerminalReply toolMsg
+                        progressPresent_
                     pure toolMsg
                 doChat chatOps $ messages <> V.fromList (msg:respMsgs)
 
             msg -> throwError $ UnhandledEgoError $
                 "invalid message from message service: " ++ show msg
 
-        sendReplyEvents content = do
-            present <- ask
-            forM_ (parseReplies content) $ trigger . uncurry (OnEgoReply present)
-        
+        sendReplyEvents content =
+            whenJustM ask \present ->
+                case TimePhase.getImmanantContent @Terminal present of
+                    Just (TerminalChat id _) -> trigger $ OnEgoReply present id content
+                    _ -> pure ()
 
 runHecoEgo :: forall es a.
     ( HasCallStack
@@ -336,18 +351,15 @@ runHecoEgo ops = reinterpret wrap \env -> \case
     InteractEgo eff ->
         localSeqUnlift env \unlift ->
             wrapInteraction ops (unlift eff)
-        `on` \case
-            OnTimePhaseLost (TimePhase _ contents) ->
-                memorizeImmanantContents ops contents
-            _ -> pure ()
-            
     where
         wrap e = do
             initialPrompt <- newSystemMessage $ ops.characterPrompt <> "\n\n" <> ops.taskPrompt
             qsem <- newQSem 1
             e & evalState (LRU.newLRU @Unique @Message $ toInteger <$> ops.messageCacheLimit)
                 . runReader qsem
-                . runReader initialPrompt
+                . runReader HecoInternal
+                    { initialMessage = initialPrompt
+                    , memorizingPrompt = ops.memorizingPrompt }
 
 runHecoEgoEx ::
     ( HasCallStack
@@ -362,5 +374,5 @@ runHecoEgoEx ::
     => HecoOps
     -> Eff (Ego : Event EgoEvent : Error EgoError : es) a
     -> Eff es (Either (CallStack, EgoError) a)
-runHecoEgoEx ops = 
+runHecoEgoEx ops =
     runError. runEvent . runHecoEgo ops

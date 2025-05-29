@@ -30,7 +30,7 @@ unliftEventIO ::
     -> Eff es b
 unliftEventIO env f = do
     res <- localSeqLend @'[Event LanguageEvent] env \useEvent ->
-        (localSeqUnliftIO env \unlift -> relayError $ f $ unlift . useEvent)
+        localSeqUnliftIO env \unlift -> relayError $ f $ unlift . useEvent
     case res of
         Left e -> throwError e
         Right r -> pure r

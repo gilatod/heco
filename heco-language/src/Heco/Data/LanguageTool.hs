@@ -1,7 +1,9 @@
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Heco.Data.LanguageTool where
 
+import Heco.Data.MonoHFunctor (MonoHFunctor(..))
 import Heco.Data.FunctionSchema (FunctionSchema(..), ObjectSpec(..), PropertySchema(..), HasDataSchema(..))
 import Heco.Data.LanguageToolError (LanguageToolError(..))
 
@@ -18,13 +20,62 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Proxy (Proxy(..))
 import Data.Typeable (Typeable)
+import Data.Kind (Constraint)
 
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits qualified as TypeLits
+import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, TypeError, ErrorMessage(..))
 import Pattern.Cast (Cast(..))
 
-data LanguageToolSpec es = LanguageToolSpec
+type family ToolNameNotConflicted (names :: [Symbol]) (name :: Symbol) :: Constraint where
+    ToolNameNotConflicted '[] name = ()
+    ToolNameNotConflicted (name:rst) name = 
+        TypeError (TypeLits.Text "Language tool name \"" :<>: TypeLits.Text name :<>: TypeLits.Text "\" conflicted")
+    ToolNameNotConflicted (_:rst) name = ToolNameNotConflicted rst name
+
+data LanguageToolSpec m = LanguageToolSpec
     { schema :: FunctionSchema
-    , handler :: HashMap Text Value -> Eff es Value }
+    , handler :: HashMap Text Value -> m Value }
+
+instance Show (LanguageToolSpec m) where
+    show s = "LanguageToolSpec [" ++ show s.schema ++ "]"
+
+instance MonoHFunctor LanguageToolSpec where
+    ohmap f t = LanguageToolSpec
+        { schema = t.schema
+        , handler = f . t.handler }
+
+newtype LanguageToolModule (name :: Symbol) m = LanguageToolModule
+    { tools :: [LanguageToolSpec m] }
+    deriving Show
+
+instance MonoHFunctor (LanguageToolModule name) where
+    ohmap f m = LanguageToolModule { tools = map (ohmap f) m.tools }
+
+newtype LanguageToolModuleBuilder (name :: Symbol) (toolNames :: [Symbol]) m
+    = LanguageToolModuleBuilder { tools :: [LanguageToolSpec m] }
+
+emptyModuleBuilder :: forall name m. LanguageToolModuleBuilder name '[] m
+emptyModuleBuilder = LanguageToolModuleBuilder { tools = [] }
+
+toModule :: LanguageToolModuleBuilder name toolNames m -> LanguageToolModule name m
+toModule builder = LanguageToolModule { tools = builder.tools }
+
+addTool :: forall toolName toolDesc handler moduleName moduleToolNames es tool.
+    ( tool ~ LanguageTool es toolName toolDesc handler
+    , KnownSymbol toolName, KnownSymbol toolDesc, KnownSymbol moduleName
+    , ToolNameNotConflicted moduleToolNames toolName
+    , InvokableLanguageTool es tool )
+    => tool
+    -> LanguageToolModuleBuilder moduleName moduleToolNames (Eff es)
+    -> LanguageToolModuleBuilder moduleName (toolName:moduleToolNames) (Eff es)
+addTool tool m = m { tools = spec : m.tools }
+    where
+        moduleName = symbolText @moduleName
+        rawSpec = cast tool :: LanguageToolSpec (Eff es)
+        spec = LanguageToolSpec
+            { schema = rawSpec.schema
+                { name = moduleName <> "_" <> rawSpec.schema.name }
+            , handler = rawSpec.handler }
 
 data Param (name :: Symbol) t
 data ParamDesc (name :: Symbol) t (desc :: Symbol)
@@ -92,7 +143,7 @@ instance
             Just value ->
                 case Aeson.fromJSON @t value of
                     Aeson.Error err -> throwArgInvalid paramKey err
-                    Aeson.Success res -> invokeLanguageTool args $
+                    Aeson.Success res -> invokeLanguageTool args
                         (LanguageTool (handler res) :: LanguageTool es name desc handler)
         where
             paramKey = symbolText @pname
@@ -112,12 +163,12 @@ instance
 
     invokeLanguageTool args (LanguageTool handler) =
         case HashMap.lookup paramKey args of
-            Nothing -> invokeLanguageTool args $
+            Nothing -> invokeLanguageTool args
                 (LanguageTool (handler Nothing) :: LanguageTool es name desc handler)
             Just value ->
                 case Aeson.fromJSON @t value of
                     Aeson.Error err -> throwArgInvalid paramKey err
-                    Aeson.Success res -> invokeLanguageTool args $
+                    Aeson.Success res -> invokeLanguageTool args
                         (LanguageTool (handler $ Just res) :: LanguageTool es name desc handler)
         where
             paramKey = symbolText @pname
@@ -137,12 +188,12 @@ instance
 
     invokeLanguageTool args (LanguageTool handler) =
         case HashMap.lookup paramKey args of
-            Nothing -> invokeLanguageTool args $
+            Nothing -> invokeLanguageTool args
                 (LanguageTool (handler Nothing) :: LanguageTool es name desc handler)
             Just value ->
                 case Aeson.fromJSON @t value of
                     Aeson.Error err -> throwArgInvalid paramKey err
-                    Aeson.Success res -> invokeLanguageTool args $
+                    Aeson.Success res -> invokeLanguageTool args
                         (LanguageTool (handler $ Just res) :: LanguageTool es name desc handler)
         where
             paramKey = symbolText @pname
@@ -166,7 +217,7 @@ instance
             Just value ->
                 case Aeson.fromJSON @t value of
                     Aeson.Error err -> throwArgInvalid paramKey err
-                    Aeson.Success res -> invokeLanguageTool args $
+                    Aeson.Success res -> invokeLanguageTool args
                         (LanguageTool (handler res) :: LanguageTool es name desc handler)
         where
             paramKey = symbolText @pname
@@ -207,7 +258,7 @@ languageToolSchema_ _ = languageToolSchema @t
 instance
     ( InvokableLanguageTool es (LanguageTool es name desc handler)
     , KnownSymbol name, KnownSymbol desc )
-    => Cast (LanguageTool es name desc handler) (LanguageToolSpec es) where
+    => Cast (LanguageTool es name desc handler) (LanguageToolSpec (Eff es)) where
     cast tool = LanguageToolSpec
         { schema = languageToolSchema @(LanguageTool es name desc handler)
         , handler = flip invokeLanguageTool tool }

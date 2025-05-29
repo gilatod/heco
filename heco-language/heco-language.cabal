@@ -49,6 +49,7 @@ library
     Heco.Data.Role,
     Heco.Data.FunctionSchema,
     Heco.Data.LanguageTool,
+    Heco.Data.LanguageToolRegistry,
     Heco.Data.LanguageError,
     Heco.Data.LanguageToolError,
     Heco.Data.Embedding,
@@ -65,6 +66,7 @@ library
     extra,
     effectful-core,
     effectful-th,
+    effectful-plugin,
     vector,
     unboxing-vector,
     containers,
@@ -85,3 +87,4 @@ library
     bytestring,
     heco-common,
     heco-event
+  ghc-options: -fplugin=Effectful.Plugin
