@@ -90,7 +90,8 @@ type family LanguageHandler es f where
     LanguageHandler es (MaybeParamDesc name t desc -> b) = Maybe t -> LanguageHandler es b
     LanguageHandler es (Ret r) = Eff es r
 
-newtype LanguageTool es (name :: Symbol) (desc :: Symbol) handler = LanguageTool (LanguageHandler es handler)
+newtype LanguageTool es (name :: Symbol) (desc :: Symbol) handler
+    = LanguageTool (LanguageHandler es handler)
 
 class InvokableLanguageTool es t where
     languageToolPropertySchemas :: [PropertySchema]

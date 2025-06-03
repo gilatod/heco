@@ -27,7 +27,7 @@ import Control.Monad (void)
 data PortalService :: Effect where
     RunPortal :: Portal m -> PortalService m TerminalId
     HasPortal :: TerminalId -> PortalService m Bool
-    GetPortalIds :: PortalService m [TerminalId]
+    ListPortalIds :: PortalService m [TerminalId]
     GetPortalName :: TerminalId -> PortalService m (Maybe Text)
     KillPortal :: TerminalId -> PortalService m Bool
     SendToPortal :: TerminalId -> PortalSignal -> PortalService m Bool
@@ -54,20 +54,20 @@ data PortalState = PortalState
     , threadId :: ThreadId
     , signalChan :: Chan PortalSignal }
 
-type PortalStates = HashMap TerminalId PortalState
+type PortalMap = HashMap TerminalId PortalState
 
-lookupPortalState :: State PortalStates :> es => TerminalId -> Eff es (Maybe PortalState)
-lookupPortalState id = gets @PortalStates $ HashMap.lookup id
+lookupPortal :: State PortalMap :> es => TerminalId -> Eff es (Maybe PortalState)
+lookupPortal id = gets @PortalMap $ HashMap.lookup id
 
-removePortalState :: State PortalStates :> es => TerminalId -> Eff es (Maybe PortalState)
-removePortalState id = state @PortalStates $ HashMap.alterF (, Nothing) id
+removePortal :: State PortalMap :> es => TerminalId -> Eff es (Maybe PortalState)
+removePortal id = state @PortalMap $ HashMap.alterF (, Nothing) id
 
 doSendToPortal ::
     ( Concurrent :> es
-    , State PortalStates :> es )
+    , State PortalMap :> es )
     => TerminalId -> PortalSignal -> Eff es Bool
 doSendToPortal id sig = do
-    res <- lookupPortalState id
+    res <- lookupPortal id
     case res of
         Nothing -> pure False
         Just ps -> do
@@ -82,21 +82,21 @@ runStandardPortalService = reinterpret wrap \env -> \case
     RunPortal (Portal name procedure) -> do
         id <- state $ dupe . (+1)
         chan <- newChan
-        localLiftUnlift env (ConcUnlift Persistent Unlimited) \lift unlift -> do
+        localLiftUnlift env unliftStrategy \lift unlift -> do
             let conduit = repeatMC $ lift $ readChan chan
             tid <- forkIO $
                 unlift (procedure id conduit)
-                    `finally` removePortalState id
+                    `finally` removePortal id
             modify $ HashMap.insert id PortalState
                 { name = name
                 , threadId = tid
                 , signalChan = chan }
             pure id
-    HasPortal id -> gets @PortalStates $ HashMap.member id
-    GetPortalIds -> gets @PortalStates HashMap.keys
-    GetPortalName id -> lookupPortalState id <&> fmap \ps -> ps.name
+    HasPortal id -> gets @PortalMap $ HashMap.member id
+    ListPortalIds -> gets @PortalMap HashMap.keys
+    GetPortalName id -> lookupPortal id <&> fmap \ps -> ps.name
     KillPortal id -> do
-        res <- removePortalState id
+        res <- removePortal id
         case res of
             Nothing -> pure False
             Just ps -> do
@@ -105,9 +105,10 @@ runStandardPortalService = reinterpret wrap \env -> \case
     SendToPortal id sig -> doSendToPortal id sig
     where
         wrap =
-            evalState (HashMap.empty :: PortalStates)
+            evalState (HashMap.empty :: PortalMap)
             . evalState (0 :: TerminalId)
             . withEvent \case
                 OnEgoReply phase id content ->
                     void $ doSendToPortal id (PortalReply phase content)
                 _ -> pure ()
+        unliftStrategy = ConcUnlift Persistent Unlimited

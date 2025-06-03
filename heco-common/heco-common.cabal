@@ -60,6 +60,8 @@ library
     template-haskell,
     effectful,
     effectful-core,
+    crypton-connection,
+    tls,
     http-client,
     http-client-tls,
     aeson,

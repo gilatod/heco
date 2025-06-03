@@ -1,6 +1,13 @@
 module Heco.Effectful.Event where
 
-import Effectful (Effect, Eff, (:>), UnliftStrategy (ConcUnlift), Persistence (Persistent), Limit (Unlimited), raise)
+import Effectful
+    ( raise,
+      type (:>),
+      Effect,
+      Eff,
+      Limit(Unlimited),
+      Persistence(Persistent),
+      UnliftStrategy(ConcUnlift) )
 import Effectful.Dispatch.Dynamic (reinterpret, HasCallStack, localUnlift)
 import Effectful.State.Static.Shared (evalState, state, get, modify, State, runState)
 import Effectful.TH (makeEffect)
@@ -52,7 +59,7 @@ data EventState e es = EventState
 runEvent :: forall e es a.
     HasCallStack => Eff (Event e : es) a -> Eff es a
 runEvent = reinterpret (evalState emptyState) \env -> \case
-    Listen listener -> localUnlift env (ConcUnlift Persistent Unlimited) \unlift ->
+    Listen listener -> localUnlift env unliftStrategy \unlift ->
         state \(EventState map acc) ->
             let handle = EventListenerHandle $ acc + 1
                 map' = HashMap.insert handle (unlift . listener) map
@@ -66,3 +73,4 @@ runEvent = reinterpret (evalState emptyState) \env -> \case
     where
         emptyState :: EventState e es
         emptyState = EventState HashMap.empty 0
+        unliftStrategy = ConcUnlift Persistent Unlimited

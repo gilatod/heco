@@ -1,15 +1,29 @@
-{-# LANGUAGE QuasiQuotes #-}
-
 module Heco.Agent.LanguageTools.Archives where
 
 import Heco.Data.MonoHFunctor (MonoHFunctor(ohmap))
-import Heco.Data.LanguageTool (LanguageTool(..), ParamDesc, Ret, MaybeParamDesc, emptyModuleBuilder, LanguageToolModule, addTool, toModule)
+import Heco.Data.LanguageTool
+    ( addTool,
+      emptyModuleBuilder,
+      toModule,
+      LanguageTool(..),
+      LanguageToolModule,
+      MaybeParamDesc,
+      ParamDesc,
+      Ret )
 import Heco.Data.LanguageToolError (LanguageToolError)
 import Heco.Data.Entity (EntityId (EntityId))
 import Heco.Data.Entity.TH (deriveEntity)
 import Heco.Data.Model (ModelName)
 import Heco.Data.Collection (CollectionName)
-import Heco.Effectful.DatabaseService (DatabaseService, addEntity, deleteEntities, searchEntities, SearchOps(..), SearchData(..), getEntity, setEntity_)
+import Heco.Effectful.DatabaseService
+    ( SearchData(TextData),
+      SearchOps(limit, vectorField),
+      DatabaseService,
+      addEntity,
+      deleteEntities,
+      getEntity,
+      searchEntities,
+      setEntity_ )
 import Heco.Effectful.LanguageService (LanguageService, embed)
 
 import Effectful ((:>), MonadIO (liftIO), IOE, Eff)
@@ -29,8 +43,9 @@ import Data.Function ((&))
 
 import PyF (fmt)
 import GHC.Generics (Generic)
+import Control.Applicative ((<|>))
 
-data ArchivesToolOps = ArchivesToolOps
+data ArchiveToolOps = ArchiveToolOps
     { embeddingModel :: ModelName
     , collectionName :: CollectionName }
 
@@ -44,7 +59,7 @@ data ArchiveEntity = ArchiveEntity
 deriveEntity ''ArchiveEntity
 
 addArchive ::
-    ( Reader ArchivesToolOps :> es
+    ( Reader ArchiveToolOps :> es
     , IOE :> es
     , DatabaseService :> es
     , LanguageService :> es )
@@ -53,7 +68,7 @@ addArchive ::
         "向「荏苒之境图书馆」添加档案"
         (ParamDesc "content" Text "档案内容" -> Ret Value)
 addArchive = LanguageTool \content -> do
-    ops <- ask @ArchivesToolOps
+    ops <- ask @ArchiveToolOps
     embedding <- embed ops.embeddingModel content
     time <- liftIO getCurrentTime
     id <- addEntity ops.collectionName ArchiveEntity
@@ -67,14 +82,14 @@ addArchive = LanguageTool \content -> do
     pure [aesonQQ|{ status: "success", archive_id: #{id} }|]
 
 getArchive ::
-    ( Reader ArchivesToolOps :> es
+    ( Reader ArchiveToolOps :> es
     , DatabaseService :> es )
     => LanguageTool es
         "get"
         "在「荏苒之境图书馆」中使用档案ID来获取档案内容"
         (ParamDesc "id" Int "档案ID" -> Ret Value)
 getArchive = LanguageTool \id -> do
-    ops <- ask @ArchivesToolOps
+    ops <- ask @ArchiveToolOps
     entity <- getEntity @ArchiveEntity ops.collectionName $ EntityId id
     case entity of
         Just (ArchiveEntity { content = Just content }) ->
@@ -82,7 +97,7 @@ getArchive = LanguageTool \id -> do
         _ -> pure [aesonQQ|{ status: "not_found" }|]
 
 modifyArchive ::
-    ( Reader ArchivesToolOps :> es
+    ( Reader ArchiveToolOps :> es
     , IOE :> es
     , DatabaseService :> es
     , LanguageService :> es )
@@ -91,7 +106,7 @@ modifyArchive ::
         "修改「荏苒之境图书馆」中的档案"
         (ParamDesc "id" Int "档案ID" -> ParamDesc "content" Text "档案的新内容" -> Ret Value)
 modifyArchive = LanguageTool \id content -> do
-    ops <- ask @ArchivesToolOps
+    ops <- ask @ArchiveToolOps
     entity <- getEntity @ArchiveEntity ops.collectionName $ EntityId id
     case entity of
         Nothing -> pure [aesonQQ|{ status: "not_found" }|]
@@ -118,46 +133,45 @@ modifyArchive = LanguageTool \id content -> do
             pure [aesonQQ|{ status: "success" }|]
 
 removeArchive ::
-    ( Reader ArchivesToolOps :> es
+    ( Reader ArchiveToolOps :> es
     , DatabaseService :> es )
     => LanguageTool es
         "remove"
         "从「荏苒之境图书馆」中删除档案"
         (ParamDesc "id" Int "档案ID" -> Ret Value)
 removeArchive = LanguageTool \id -> do
-    ops <- ask @ArchivesToolOps
+    ops <- ask @ArchiveToolOps
     deleteEntities ops.collectionName [fmt|id=={id}|]
     pure [aesonQQ|{ status: "success" }|]
 
 searchArchive ::
-    ( Reader ArchivesToolOps :> es
+    ( Reader ArchiveToolOps :> es
     , DatabaseService :> es )
     => LanguageTool es
         "search"
-        "在「荏苒之境图书馆」中搜索档案"
+        "搜索档案"
         ( ParamDesc "keywords" Text "关键词"
         -> MaybeParamDesc "limit" Int "搜索数量限制"
         -> Ret Value)
 searchArchive = LanguageTool \keywords limit -> do
-    ops <- ask @ArchivesToolOps
+    ops <- ask @ArchiveToolOps
     let searchOps = def
             { vectorField = "sparse_vector"
-            , limit = Just $ fromMaybe 10 limit }
+            , limit = limit <|> Just 10 }
         searchData = V.singleton $ TextData keywords
     res <- searchEntities @ArchiveEntity ops.collectionName searchOps searchData
     pure [aesonQQ|{ count: #{V.length res}, results: #{res} }|]
 
-archiveTools ::
+archivesToolModule ::
     ( IOE :> es
     , DatabaseService :> es
     , LanguageService :> es
     , Error LanguageToolError :> es )
-    => ArchivesToolOps -> LanguageToolModule "archive" (Eff es)
-archiveTools ops = emptyModuleBuilder
+    => ArchiveToolOps -> LanguageToolModule "archives" (Eff es)
+archivesToolModule ops = emptyModuleBuilder
     & addTool addArchive
     & addTool removeArchive
     & addTool getArchive
     & addTool modifyArchive
     & addTool searchArchive
-    & toModule
-    & ohmap (runReader ops)
+    & toModule & ohmap (runReader ops)

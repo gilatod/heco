@@ -46,13 +46,12 @@ import Ldap.Client qualified as Ldap
 import Data.Text (Text)
 import Data.List.NonEmpty (NonEmpty(..), (<|))
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
-import Data.Maybe (listToMaybe)
+import Data.Maybe ( listToMaybe, mapMaybe )
 import Data.Time (getCurrentTime)
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
 import Data.HashMap.Strict (HashMap, fromList)
 import Data.HashMap.Strict qualified as HashMap
-import Data.Maybe (mapMaybe)
 import Data.Function ((&))
 import Control.Exception (catch, throw)
 
@@ -91,7 +90,7 @@ data LdapOps = LdapOps
 type LdapAttrMap = HashMap Text [Text]
 
 withLdap :: HasCallStack => LdapOps -> (Ldap -> IO a) -> IO a
-withLdap ops f = 
+withLdap ops f =
     either throwUnhandledError id <$>
         Ldap.with ops.host ops.port \l -> do
             f l `catch` \(e :: ResponseError) ->
@@ -117,7 +116,7 @@ entryToMap :: SearchEntry -> LdapAttrMap
 entryToMap (SearchEntry _ attrList) =
     fromList $ map convertPair attrList
     where
-        convertPair ((Attr attr), values) = (attr, map decodeUtf8 values)
+        convertPair (Attr attr, values) = (attr, map decodeUtf8 values)
 
 data ActiveUser = ActiveUser
     { user :: User
@@ -143,7 +142,7 @@ modifyActiveUser ::
 modifyActiveUser username f = modify \s ->
     let (maybeRenamedUser, activeUsers') =
             HashMap.alterF alterActiveUser username s.activeUsers
-        activeUsers'' = 
+        activeUsers'' =
             case maybeRenamedUser of
                 Just au -> HashMap.insert au.user.username au activeUsers'
                 Nothing -> activeUsers'
@@ -385,5 +384,5 @@ runLdapAccountServiceEx ::
     => LdapOps
     -> Eff (AccountService : Event AccountEvent : Error AccountError : es) a
     -> Eff es (Either (CallStack, AccountError) a)
-runLdapAccountServiceEx ops = 
+runLdapAccountServiceEx ops =
     runError . runEvent . runLdapAccountService ops

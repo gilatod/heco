@@ -27,7 +27,7 @@ joinImmanantContent separator =
 data AnyImmanantContent = forall c. ImmanantContent c => AnyImmanantContent c
 
 instance ImmanantContent c => Cast c AnyImmanantContent where
-    cast c = AnyImmanantContent c
+    cast = AnyImmanantContent
 
 data TimePhase = TimePhase Unique (Vector AnyImmanantContent)
 
@@ -36,7 +36,7 @@ instance Show TimePhase where
 
 new :: IOE :> es => Vector AnyImmanantContent -> Eff es TimePhase
 new cs = do
-    u <- liftIO $ newUnique
+    u <- liftIO newUnique
     pure $ TimePhase u cs
 
 length :: TimePhase -> Int
@@ -44,12 +44,12 @@ length (TimePhase _ contents) = V.length contents
 
 format :: TimePhase -> TL.Text
 format (TimePhase _ contents) =
-    TLB.toLazyText $ "TimePhase " <> (formatList $ map formatImmanant $ V.toList contents)
+    TLB.toLazyText $ "TimePhase " <> formatList (map formatImmanant $ V.toList contents)
     where
         formatImmanant (AnyImmanantContent @c c) =
             case encodeImmanantContent c of
                 [] -> TLB.fromString $ show $ typeRep (Proxy :: Proxy c)
-                cs -> formatList $ map TLB.fromText $ cs
+                cs -> formatList $ map TLB.fromText cs
         formatList l =
             let inner = mconcat $ intersperse ", " l
             in "[" <> inner <> "]"

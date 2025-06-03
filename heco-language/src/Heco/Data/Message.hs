@@ -29,7 +29,7 @@ formatToolCall :: ToolCall -> TL.Text
 formatToolCall t =
     TLB.toLazyText $
         "ToolCall <" <> TLB.fromText t.name <> "> { " <>
-        (mconcat $ intersperse ", " $ map formatPair $ Map.toList t.arguments) <> " }"
+        mconcat (intersperse ", " $ map formatPair $ Map.toList t.arguments) <> " }"
     where
         formatPair (k, v) =
             TLB.fromText k <> " = " <>
@@ -91,7 +91,7 @@ formatMessage = \case
         TLB.fromLazyText (TL.decodeUtf8 $ Aeson.encode r.content)
     AssistantMessage _ statement reasoning c ->
         "Assistant: " <> reasoningSection <> TL.fromStrict statement <>
-        (mconcat $ map ((" " <>) . formatToolCall) c)
+            mconcat (map ((" " <>) . formatToolCall) c)
         where
             reasoningSection = if reasoning == ""
                 then ""

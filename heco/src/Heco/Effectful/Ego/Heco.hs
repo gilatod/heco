@@ -14,20 +14,30 @@ import Heco.Data.TimePhase
 import Heco.Data.Immanant.Memory (Memory(..))
 import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Data.Collection (CollectionName)
-import Heco.Data.Message (Message(..), newUserMessage, newSystemMessage, newToolMessage, ToolCall(..), ToolResponse(..), messageText)
+import Heco.Data.Message
+    ( messageText,
+      newSystemMessage,
+      newToolMessage,
+      newUserMessage,
+      Message(ToolMessage, UserMessage, AssistantMessage),
+      ToolCall(id, name, arguments),
+      ToolResponse(content, ToolResponse, id, name) )
 import Heco.Data.LanguageError (LanguageError)
 import Heco.Data.EgoError (EgoError(..))
 import Heco.Data.TimePhase qualified as TimePhase
 import Heco.Events.EgoEvent (EgoEvent(..))
-import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(OnTimePhaseLost))
+import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(..))
 import Heco.Effectful.Event (Event, trigger, runEvent, collect)
 import Heco.Effectful.DatabaseService
     ( SearchOps(..),
       DatabaseService,
       searchEntities, SearchData (DenseVectorData), addEntity_ )
 import Heco.Effectful.LanguageService
-    ( chat, embed, ChatOps(..), LanguageService )
-import Heco.Effectful.LanguageToolProvider (LanguageToolProvider, getLanguageToolSchemas, invokeLanguageTool)
+    ( chat, embed, ChatOps(tools), LanguageService )
+import Heco.Effectful.LanguageToolProvider
+    ( LanguageToolProvider,
+      getLanguageToolSchemas,
+      invokeLanguageTool ) 
 import Heco.Effectful.InternalTimeStream
     ( InternalTimeStream,
       present_,
@@ -325,7 +335,7 @@ wrapInteraction ops eff = do
                     pure toolMsg
                 doChat chatOps $ messages <> V.fromList (msg:respMsgs)
 
-            msg -> throwError $ UnhandledEgoError $
+            msg -> throwError $ EgoInvalidReplyError $
                 "invalid message from message service: " ++ show msg
 
         sendReplyEvents content =

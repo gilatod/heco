@@ -48,6 +48,7 @@ import Data.Proxy (Proxy(..))
 import Data.Maybe (fromMaybe)
 import Data.Typeable (typeRepTyCon, tyConName, TypeRep, typeRep, Typeable)
 import Data.Scientific (toRealFloat, toBoundedInteger)
+import Data.Functor ((<&>))
 import Control.Arrow ((>>>))
 import Control.Monad.Extra (firstJustM)
 
@@ -277,7 +278,7 @@ encodeEnumSpecsKV opts = enums opts <> enumDescs opts
             in if all (=="") descs
                 then mempty
                 else ("enumDescriptions" .=.) . list toEncoding $ descs
-    
+
 encodeNumberSpecKV ::
     ( KeyValue Encoding kv, Monoid kv
     , ToJSON n
@@ -317,7 +318,7 @@ encodeObjectSpecKV s = mconcat
     [ "properties" .=. (pairs . mconcat . map encodePropertySchemaKV) s.properties
     , "additionalProperties" .=. either toEncoding toEncoding s.additionalProperties
     , "required" .= (map (\s -> s.name) . filter (\s -> not s.optional)) s.properties ]
- 
+
 encodePropertySchemaKV :: KeyValue Encoding kv => PropertySchema -> kv
 encodePropertySchemaKV s = Key.fromText s.name .=. pairs inner
     where
@@ -365,7 +366,7 @@ parseDataSchema v = do
                 Nothing -> parseSimpleDataSchema v
                 Just items -> do
                     itemType <- v .:? "type"
-                    descs <- v .:? "enumDescriptions" >>= pure . fromMaybe (repeat Nothing)
+                    descs <- (v .:? "enumDescriptions") <&> fromMaybe (repeat Nothing)
                     case itemType :: Maybe Text of
                         Nothing -> pure $ AnyEnumSchema $ zipWith EnumOption items descs
                         Just t -> parseTypedEnum items descs t
@@ -391,7 +392,7 @@ parseDataSchema v = do
                     convert _ = fail "Invalid boolean enum item"
                 boolItems <- mapM convert items
                 pure $ BoolEnumSchema $ zipWith EnumOption boolItems descs
-            otherwise -> fail $ "Invalid enum type: " ++ show otherwise
+            other -> fail $ "Invalid enum type: " ++ show other
 
 parseSimpleDataSchema :: Aeson.Object -> Aeson.Parser DataSchema
 parseSimpleDataSchema v = do
@@ -434,7 +435,7 @@ parseSimpleDataSchema v = do
             maximumLength <- v .:? "maximumLength"
             itemSpec <- case items of
                 Left s -> do
-                    uniqueItems <- v .:? "uniqueItems" >>= pure . fromMaybe False
+                    uniqueItems <- (v .:? "uniqueItems") <&> fromMaybe False
                     if uniqueItems
                         then pure $ UniqueItems s
                         else pure $ ArrayItems s
@@ -462,7 +463,7 @@ instance FromJSON StringFormat where
         "uri" -> pure URIFormat
         "json-pointer" -> pure PointerFormat
         "regex" -> pure RegexFormat
-        otherwise -> pure $ UnknownFormat otherwise
+        other -> pure $ UnknownFormat other
 
 instance FromJSON ObjectSpec where
     parseJSON = Aeson.withObject "Object" parseObjectSpec
@@ -627,7 +628,7 @@ instance Cast (Field t) t where
     cast (Field f) = f
 
 instance Cast t (Field t) where
-    cast f = Field f
+    cast = Field
 
 newtype FieldDesc t (desc :: Symbol) = FieldDesc t
     deriving Generic
@@ -639,7 +640,7 @@ instance Cast (FieldDesc t desc) t where
     cast (FieldDesc f) = f
 
 instance Cast t (FieldDesc t desc) where
-    cast f = FieldDesc f
+    cast = FieldDesc
 
 class IsProperField f where
     fieldTypeRep :: TypeRep
@@ -686,7 +687,8 @@ instance (Enum t, Bounded t, ToJSON t) => HasDataSchema (EnumDefault t) where
 instance (Enum t, Bounded t, ToJSON t, KnownSymbols descs)
     => HasDataSchema (EnumDefaultDesc t descs) where
     dataSchema = StringEnumSchema $
-        zip ([minBound..maxBound] :: [t]) (symbolValues @descs) & map \(v, desc) ->
-            EnumOption
+        zipWith doZip ([minBound..maxBound] :: [t]) $ symbolValues @descs
+        where
+            doZip v desc = EnumOption
                 { value = TL.toStrict $ TL.decodeUtf8 $ Aeson.encode v
                 , description = Just $ T.pack desc }

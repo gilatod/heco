@@ -9,13 +9,15 @@ import Effectful.Concurrent.Async (concurrently)
 import Conduit (ConduitT, (.|))
 import Conduit qualified as C
 
+import Control.Monad (void)
+
 mergeSources ::
     (Concurrent :> es, m ~ Eff es)
     => ConduitT () o m () -> ConduitT () o m () -> ConduitT () o m ()
 mergeSources src1 src2 = do
     chan <- C.lift newTChanIO
     let runSrc src = C.runConduit $ src .| C.mapM_C (atomically . writeTChan chan)
-    _ <- C.lift $ concurrently (runSrc src1) (runSrc src2)
+    void $ C.lift $ concurrently (runSrc src1) (runSrc src2)
     let consume = do
             mx <- C.lift $ atomically (tryReadTChan chan)
             case mx of

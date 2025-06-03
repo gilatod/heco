@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE DeriveAnyClass #-}
 
 module Heco.Data.Aeson where
 

@@ -1,4 +1,6 @@
 index-state: hackage.haskell.org 2025-05-22T21:49:07Z
+multi-repl: True
+optimization: 2
 
 packages:
   heco
@@ -10,6 +12,7 @@ packages:
   heco-language
   heco-subjectivity
   heco-portal
+  heco-multitask
 
 allow-newer:
   base,

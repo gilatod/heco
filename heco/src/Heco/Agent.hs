@@ -34,10 +34,16 @@ import Heco.Effectful.LanguageService.Ollama (OllamaOps(..))
 import Heco.Effectful.LanguageToolProvider.Native (runNativeLanguageToolProviderEx, modifyLangaugeToolRegistry)
 import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps(..), runRingBufferInternalTimeStreamEx)
+import Heco.Effectful.TaskService (runStandardTaskServiceEx)
 import Heco.Effectful.Ego.Heco
-    ( runHecoEgoEx, HecoOps(..), HecoMemoryOps(..), immanantContentXMLFormatter, hecoMemoryOps )
+    ( hecoMemoryOps,
+      immanantContentXMLFormatter,
+      runHecoEgoEx,
+      HecoMemoryOps(searchOps),
+      HecoOps(..) )
 import Heco.Effectful.PortalService (runStandardPortalService, runPortal_)
-import Heco.Agent.LanguageTools.Archives (archiveTools, ArchivesToolOps(..))
+import Heco.Agent.LanguageTools.Archives (archivesToolModule, ArchiveToolOps(..))
+import Heco.Agent.LanguageTools.Downloader (downloaderToolModule)
 import Heco.Agent.AuthGroups (authGroups)
 
 import Effectful (runEff, Eff, IOE, (:>))
@@ -47,6 +53,7 @@ import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, send)
 import Effectful.Error.Dynamic (CallStack, Error, runError)
 import Effectful.Labeled (runLabeled, Labeled(Labeled))
 import Effectful.Resource (runResource)
+import Effectful.Timeout (runTimeout)
 
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -54,7 +61,7 @@ import Data.Aeson (FromJSON, ToJSON, Value (Bool))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Default (Default(..))
 
-import Control.Monad (forever)
+import Control.Monad (forever, void)
 import GHC.Generics (Generic)
 
 runCombinedLanguageService ::
@@ -124,7 +131,8 @@ runHecoAgent = do
     hecoOps <- makeHecoOps
     openaiOps <- makeOpenAIOps
 
-    let runHeco = runEff . runFailIO . runConcurrent . runResource
+    let runHeco = runEff . runFailIO . runConcurrent . runResource. runTimeout
+            . runThrowEither . runStandardTaskServiceEx
             . runSimplePrivilegeService authGroups
             . runThrowEither . runCombinedLanguageService openaiOps ollamaOps
             . runThrowEither . runLdapAccountServiceEx LdapOps
@@ -157,12 +165,14 @@ runHecoAgent = do
             . runThrowEither . runHecoEgoEx hecoOps
             . runStandardPortalService
 
-    _ <- runHeco do
-        modifyLangaugeToolRegistry $
-            Registry.addModule $
-                archiveTools ArchivesToolOps
+    void $ runHeco do
+        modifyLangaugeToolRegistry
+            $ Registry.addModule
+                (archivesToolModule ArchiveToolOps
                     { embeddingModel = "text-embedding-v3"
-                    , collectionName = "archives" }
+                    , collectionName = "archives" })
+            . Registry.addModule
+                downloaderToolModule
 
         runPortal_ shellPortal
         runPortal_ $ makeOneBotPortal def
@@ -170,4 +180,3 @@ runHecoAgent = do
             , websocketHost = "gilatod.local" }
 
         forever $ threadDelay maxBound
-    pure ()

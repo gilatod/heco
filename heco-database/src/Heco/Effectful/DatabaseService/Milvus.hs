@@ -16,7 +16,12 @@ import Heco.Data.DatabaseError (DatabaseError(..))
 import Heco.Data.Collection (CollectionName(CollectionName))
 import Heco.Events.DatabaseEvent (DatabaseEvent(..))
 import Heco.Effectful.HTTP (evalHttpManager)
-import Heco.Effectful.DatabaseService (DatabaseService(..), CollectionLoadState(..), QueryOps(..), SearchOps(..), SearchData(..))
+import Heco.Effectful.DatabaseService
+    ( SearchData,
+      SearchOps(offset, radius, rangeFilter, vectorField, filter, limit),
+      DatabaseService(..),
+      CollectionLoadState(message, CollectionLoadState, state, progress),
+      QueryOps(offset, filter, limit) )
 import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful (IOE, (:>), Eff, MonadIO (liftIO))
@@ -416,14 +421,12 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
                 , outputFields = entityDataFields @e }
         maybe throwInvalidResponseError pure resp._data
 
-    DeleteEntities (CollectionName col) filter -> do
-        _ <- milvusPost @MilvusCollectionResp ops "/vectordb/entities/delete"
+    DeleteEntities (CollectionName col) filter ->
+        void $ milvusPost @MilvusCollectionResp ops "/vectordb/entities/delete"
             MilvusDeleteOps
                 { dbName = ops.database
                 , collectionName = col
                 , filter = filter }
-        pure ()
-
     where
         insertionUrl = "/vectordb/entities/insert" :: Text
         upsertionUrl = "/vectordb/entities/upsert" :: Text
