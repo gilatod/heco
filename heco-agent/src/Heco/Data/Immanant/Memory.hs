@@ -4,7 +4,7 @@ module Heco.Data.Immanant.Memory where
 
 import Heco.Data.Entity (EntityId)
 import Heco.Data.Entity.TH (deriveEntity)
-import Heco.Data.TimePhase (ImmanantContent(..), AnyImmanantContent(AnyImmanantContent))
+import Heco.Data.TimePhase (ImmanantContent(..), AnyImmanantContent(..))
 
 import Data.Text (Text)
 import Data.Default (Default(..))

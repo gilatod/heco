@@ -1,8 +1,8 @@
 module Heco.Effectful.PortalService where
 
 import Heco.Data.Portal (Portal(..), PortalSignal(..))
-import Heco.Data.Immanant.Terminal (TerminalId(..))
-import Heco.Events.EgoEvent (EgoEvent(..))
+import Heco.Data.Immanant.Terminal (SessionId(..))
+import Heco.Events.AgentEvent (AgentEvent(..))
 import Heco.Effectful.Event (Event, withEvent)
 
 import Effectful (Effect, Eff, (:>), UnliftStrategy(ConcUnlift), Persistence(Persistent), Limit(Unlimited))
@@ -25,28 +25,28 @@ import Control.Concurrent (ThreadId)
 import Control.Monad (void)
 
 data PortalService :: Effect where
-    RunPortal :: Portal m -> PortalService m TerminalId
-    HasPortal :: TerminalId -> PortalService m Bool
-    ListPortalIds :: PortalService m [TerminalId]
-    GetPortalName :: TerminalId -> PortalService m (Maybe Text)
-    KillPortal :: TerminalId -> PortalService m Bool
-    SendToPortal :: TerminalId -> PortalSignal -> PortalService m Bool
+    RunPortal :: Portal m -> PortalService m SessionId
+    HasPortal :: SessionId -> PortalService m Bool
+    ListPortalIds :: PortalService m [SessionId]
+    GetPortalName :: SessionId -> PortalService m (Maybe Text)
+    KillPortal :: SessionId -> PortalService m Bool
+    SendToPortal :: SessionId -> PortalSignal -> PortalService m Bool
 
 makeEffect ''PortalService
 
-runPortal_ :: (HasCallStack, PortalService :> es) => Portal (Eff es) -> Eff es ()
+runPortal_ :: PortalService :> es => Portal (Eff es) -> Eff es ()
 runPortal_ portal = void $ runPortal portal
 
-killPortal_ :: (HasCallStack, PortalService :> es) => TerminalId -> Eff es ()
+killPortal_ :: PortalService :> es => SessionId -> Eff es ()
 killPortal_ id = void $ killPortal_ id
 
-sendToPortal_ :: (HasCallStack, PortalService :> es) => TerminalId -> PortalSignal -> Eff es ()
+sendToPortal_ :: PortalService :> es => SessionId -> PortalSignal -> Eff es ()
 sendToPortal_ id sig = void $ sendToPortal id sig
 
-closePortal :: (HasCallStack, PortalService :> es) => TerminalId -> Eff es Bool
+closePortal :: PortalService :> es => SessionId -> Eff es Bool
 closePortal id = sendToPortal id PortalClose
 
-closePortal_ :: (HasCallStack, PortalService :> es) => TerminalId -> Eff es ()
+closePortal_ :: PortalService :> es => SessionId -> Eff es ()
 closePortal_ id = void $ closePortal id
 
 data PortalState = PortalState
@@ -54,18 +54,18 @@ data PortalState = PortalState
     , threadId :: ThreadId
     , signalChan :: Chan PortalSignal }
 
-type PortalMap = HashMap TerminalId PortalState
+type PortalMap = HashMap SessionId PortalState
 
-lookupPortal :: State PortalMap :> es => TerminalId -> Eff es (Maybe PortalState)
+lookupPortal :: State PortalMap :> es => SessionId -> Eff es (Maybe PortalState)
 lookupPortal id = gets @PortalMap $ HashMap.lookup id
 
-removePortal :: State PortalMap :> es => TerminalId -> Eff es (Maybe PortalState)
+removePortal :: State PortalMap :> es => SessionId -> Eff es (Maybe PortalState)
 removePortal id = state @PortalMap $ HashMap.alterF (, Nothing) id
 
 doSendToPortal ::
     ( Concurrent :> es
     , State PortalMap :> es )
-    => TerminalId -> PortalSignal -> Eff es Bool
+    => SessionId -> PortalSignal -> Eff es Bool
 doSendToPortal id sig = do
     res <- lookupPortal id
     case res of
@@ -76,7 +76,7 @@ doSendToPortal id sig = do
 
 runStandardPortalService :: forall es a.
     ( HasCallStack
-    , Concurrent :> es, Event EgoEvent :> es )
+    , Concurrent :> es, Event AgentEvent :> es )
     => Eff (PortalService : es) a -> Eff es a
 runStandardPortalService = reinterpret wrap \env -> \case
     RunPortal (Portal name procedure) -> do
@@ -106,9 +106,9 @@ runStandardPortalService = reinterpret wrap \env -> \case
     where
         wrap =
             evalState (HashMap.empty :: PortalMap)
-            . evalState (0 :: TerminalId)
+            . evalState (0 :: SessionId)
             . withEvent \case
-                OnEgoReply phase id content ->
-                    void $ doSendToPortal id (PortalReply phase content)
+                OnAgentReply phase id content ->
+                    void $ doSendToPortal id $ PortalReply phase content
                 _ -> pure ()
         unliftStrategy = ConcUnlift Persistent Unlimited

@@ -6,14 +6,14 @@ import Effectful (Eff, (:>), IOE, MonadIO (liftIO))
 
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
-import Data.Text.Lazy.Encoding qualified as TL
 import Data.Text.Lazy.Builder qualified as TLB
 import Data.Aeson (Value)
-import Data.Aeson qualified as Aeson
+import Data.Aeson.Text qualified as Aeson
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as Map
 import Data.Unique (Unique, newUnique)
 import Data.List (intersperse)
+
 import GHC.Generics (Generic)
 
 data ToolCall = ToolCall
@@ -33,7 +33,7 @@ formatToolCall t =
     where
         formatPair (k, v) =
             TLB.fromText k <> " = " <>
-            TLB.fromLazyText (TL.decodeUtf8 $ Aeson.encode v)
+            TLB.fromLazyText (Aeson.encodeToLazyText v)
 
 data ToolResponse = ToolResponse
     { id :: Text
@@ -79,7 +79,7 @@ messageText :: Message -> Text
 messageText = \case
     SystemMessage _ t -> t
     UserMessage _ t -> t
-    ToolMessage _ r -> TL.toStrict $ TL.decodeUtf8 $ Aeson.encode r.content
+    ToolMessage _ r -> TL.toStrict $ Aeson.encodeToLazyText r.content
     AssistantMessage _ t _ _ -> t
 
 formatMessage :: Message -> TL.Text
@@ -88,7 +88,7 @@ formatMessage = \case
     UserMessage _ t -> "User: " <> TL.fromStrict t
     ToolMessage _ r -> TLB.toLazyText $
         "ToolResponse <" <> TLB.fromText r.name <> ">: " <>
-        TLB.fromLazyText (TL.decodeUtf8 $ Aeson.encode r.content)
+        TLB.fromLazyText (Aeson.encodeToLazyText r.content)
     AssistantMessage _ statement reasoning c ->
         "Assistant: " <> reasoningSection <> TL.fromStrict statement <>
             mconcat (map ((" " <>) . formatToolCall) c)

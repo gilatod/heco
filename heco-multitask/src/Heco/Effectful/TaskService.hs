@@ -4,9 +4,8 @@ import Heco.Data.Task
     ( TaskId,
       TaskTrigger(..),
       TaskStage(..),
-      TaskStatus(..),
       Task(..) )
-import Heco.Data.TaskError (TaskError (TaskNotFoundError))
+import Heco.Data.TaskError (TaskError(TaskNotFoundError))
 
 import Effectful
     ( type (:>),
@@ -20,13 +19,15 @@ import Effectful.TH (makeEffect)
 import Effectful.Error.Dynamic (Error, runError, CallStack, throwError)
 import Effectful.Concurrent (Concurrent, forkIO, threadDelay, killThread, myThreadId)
 import Effectful.Concurrent.MVar (MVar, newMVar, modifyMVar, readMVar)
-import Effectful.State.Static.Shared (evalState, get, state, State, modify, gets)
+import Effectful.State.Static.Shared (evalState, get, state, State, modify, gets, stateM)
 import Effectful.Exception (catch, SomeException)
 
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
+import Data.HashSet (HashSet)
+import Data.HashSet qualified as HashSet
 import Data.Tuple.Extra (dupe)
 import Data.Time
     ( nominalDiffTimeToSeconds,
@@ -35,20 +36,31 @@ import Data.Time
       diffLocalTime,
       getZonedTime,
       LocalTime(localDay, LocalTime, localTimeOfDay),
-      ZonedTime(zonedTimeToLocalTime) )
+      ZonedTime(zonedTimeToLocalTime), UTCTime )
 import Data.Int (Int64)
 
 import Control.Concurrent (ThreadId)
-import Control.Monad (forever, when, void)
+import Control.Monad (forever, when, void, forM_)
+import Control.Monad.Extra (whenJust)
 
 data TaskInfo = TaskInfo
     { id :: TaskId
     , name :: Text
     , description :: Maybe Text
-    , trigger :: TaskTrigger }
+    , trigger :: TaskTrigger
+    , parent :: Maybe TaskId }
+
+data TaskStatus = TaskStatus
+    { stage :: TaskStage
+    , createTime :: UTCTime
+    , lastRunTime :: Maybe UTCTime
+    , lastCompleteTime :: Maybe UTCTime
+    , children :: HashSet TaskId }
+    deriving (Eq, Show)
 
 data TaskService :: Effect where
     StartTask :: Task m -> TaskService m TaskId
+    StartSubTask :: TaskId -> Task m -> TaskService m TaskId
     StopTask :: TaskId -> TaskService m ()
     KillTask :: TaskId -> TaskService m ()
     ListTasks :: TaskService m [TaskInfo]
@@ -60,6 +72,9 @@ makeEffect ''TaskService
 startTask_ :: TaskService :> es => Task (Eff es) -> Eff es ()
 startTask_ task = void $ startTask task
 
+startSubTask_ :: TaskService :> es => TaskId -> Task (Eff es) -> Eff es ()
+startSubTask_ parentId task = void $ startSubTask parentId task
+
 data TaskEntry = TaskEntry
     { threadId :: ThreadId
     , info :: TaskInfo
@@ -67,14 +82,43 @@ data TaskEntry = TaskEntry
 
 type TaskMap = HashMap TaskId TaskEntry
 
-removeTask :: State TaskMap :> es => TaskId -> Eff es (Maybe TaskEntry)
-removeTask id = state @TaskMap $ HashMap.alterF (, Nothing) id
+removeTask ::
+    ( HasCallStack
+    , State TaskMap :> es
+    , Concurrent :> es )
+    => TaskId -> Eff es (Maybe TaskEntry)
+removeTask id = do
+    entry <- stateM @TaskMap \map -> do
+        let (entry, map') = HashMap.alterF (, Nothing) id map
+        case entry of
+            Just e
+                | Just parentId <- e.info.parent
+                , Just parentEntry <- HashMap.lookup parentId map' -> do
+                modifyMVar parentEntry.status \s ->
+                    pure (s { children = HashSet.delete id s.children }, ())
+            _ -> pure ()
+        pure (entry, map')
+    whenJust entry killChildren
+    pure entry
 
-removeTask_ :: State TaskMap :> es => TaskId -> Eff es ()
+removeTask_ ::
+    ( State TaskMap :> es
+    , Concurrent :> es )
+    => TaskId -> Eff es ()
 removeTask_ id = void $ removeTask id
 
+killChildren ::
+    ( HasCallStack
+    , State TaskMap :> es
+    , Concurrent :> es )
+    => TaskEntry -> Eff es ()
+killChildren entry = do
+    status <- readMVar entry.status
+    forM_ status.children removeTask
+
 getTask ::
-    ( State TaskMap :> es
+    ( HasCallStack
+    , State TaskMap :> es
     , Error TaskError :> es )
     => TaskId -> Eff es TaskEntry
 getTask id = do
@@ -126,15 +170,15 @@ runTaskThread info status procedure = do
                 action
             RestartOnException _ trg -> scheduleTask trg action
         
-        modifyStatus mapper =
-            modifyMVar status \s -> case s.stage of
+        modifyStatus mapper = do
+            shouldRemove <- modifyMVar status \s -> case s.stage of
                 StoppedStage -> do
-                    void $ removeTask info.id
                     myThreadId >>= killThread
-                    pure (s, ())
+                    pure (s, True)
                 _ -> do
                     now <- liftIO getCurrentTime
-                    pure (mapper now s, ())
+                    pure (mapper now s, False)
+            when shouldRemove $ removeTask_ info.id
 
         handleError retry (e :: SomeException) = do
             liftIO $ putStrLn $ "Exception caught when running task \'"
@@ -165,21 +209,24 @@ createTask ::
     , State TaskId :> es )
     => LocalEnv localEs es
     -> UnliftStrategy
+    -> Maybe TaskId
     -> Task (Eff localEs)
     -> Eff es TaskEntry
-createTask env unliftStrategy task = do
+createTask env unliftStrategy parentId task = do
     id <- state $ dupe . (+1)
     now <- liftIO getCurrentTime
     status <- newMVar TaskStatus
         { stage = InitialStage
         , createTime = now
         , lastRunTime = Nothing
-        , lastCompleteTime = Nothing }
+        , lastCompleteTime = Nothing
+        , children = HashSet.empty }
     let info = TaskInfo
             { id = id
             , name = task.name
             , description = task.description
-            , trigger = task.trigger }
+            , trigger = task.trigger
+            , parent = parentId }
     localUnlift env unliftStrategy \unlift -> do
         tid <- runTaskThread info status $ unlift task.procedure
         pure TaskEntry
@@ -196,26 +243,46 @@ runStandardTaskService ::
     -> Eff es a
 runStandardTaskService = reinterpret wrap \env -> \case
     StartTask task -> do
-        entry <- createTask env unliftStrategy task
+        entry <- createTask env unliftStrategy Nothing task
         let id = entry.info.id
         modify $ HashMap.insert id entry
         pure id
+
+    StartSubTask parentId task -> do
+        parentEntry :: TaskEntry <-
+            gets (HashMap.lookup parentId)
+            >>= maybe (throwError $ TaskNotFoundError $ "Parent task not found: " ++ show parentId) pure
+        entry <- createTask env unliftStrategy (Just parentId) task
+        let id = entry.info.id
+        modify $ HashMap.insert id entry
+        modifyMVar parentEntry.status \s ->
+            pure (s { children = HashSet.insert id s.children }, ())
+        pure id
+
     StopTask id -> do
         entry <- getTask id
-        modifyMVar entry.status \s ->
-            pure (s { stage = StoppedStage }, ())
+        shouldRemove <- modifyMVar entry.status \s ->
+            if s.stage == StoppedStage
+                then killThread entry.threadId >> pure (s, True)
+                else pure (s { stage = StoppedStage }, False)
+        when shouldRemove $ removeTask_ entry.info.id
+
     KillTask id -> do
         entry <- getTask id
-        killThread entry.threadId
         removeTask_ id
+        killThread entry.threadId
+        
     ListTasks ->
         get @TaskMap >>= pure . HashMap.foldr' (\s l -> s.info:l) []
+
     LookupTask id -> do
         res <- gets @TaskMap (HashMap.lookup id)
         pure $ (\e -> e.info) <$> res 
+
     GetTaskStatus id -> do
         entry <- getTask id
         readMVar entry.status
+
     where
         wrap =
             evalState (HashMap.empty :: TaskMap)

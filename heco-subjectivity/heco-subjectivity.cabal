@@ -48,6 +48,7 @@ library
     Heco.Data.TimePhase,
     Heco.Data.Immanant.SenseData,
     Heco.Data.Immanant.Action,
+    Heco.Data.Immanant.Referent,
     Heco.Data.InternalTimeStreamError,
     Heco.Effectful.InternalTimeStream,
     Heco.Effectful.InternalTimeStream.RingBuffer,

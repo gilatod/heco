@@ -7,7 +7,7 @@ packages:
   heco-account
   heco-common
   heco-database
-  heco-ego
+  heco-agent
   heco-event
   heco-language
   heco-subjectivity

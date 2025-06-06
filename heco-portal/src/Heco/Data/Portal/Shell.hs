@@ -5,7 +5,7 @@ import Heco.Data.Portal (Portal(..), PortalSignal(..))
 import Heco.Data.TimePhase (format)
 import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Effectful.InternalTimeStream (InternalTimeStream, presentOne_, getRetention)
-import Heco.Effectful.Ego (interactEgo, Ego)
+import Heco.Effectful.Agent (withAgentInteraction, Agent)
 
 import Effectful (Eff, (:>), IOE)
 import Effectful.Concurrent (Concurrent)
@@ -34,7 +34,7 @@ shellPortal :: forall es.
     , Concurrent :> es
     , InternalTimeStream :> es
     , PortalService :> es
-    , Ego :> es )
+    , Agent :> es )
     => Portal (Eff es)
 shellPortal = Portal "shell" \pid sigSrc ->
     C.runConduit $ mergeSources
@@ -49,7 +49,7 @@ shellPortal = Portal "shell" \pid sigSrc ->
                 C.lift $ killPortal_ pid
             s -> if T.head s == '/'
                 then liftIO $ putStrLn $ "Error: invalid command "  <> T.unpack s
-                else C.lift $ interactEgo do
+                else C.lift $ withAgentInteraction do
                     presentOne_ $ TerminalChat pid $ "User: " <> s
 
         handleSigSrc pid = C.awaitForever \case

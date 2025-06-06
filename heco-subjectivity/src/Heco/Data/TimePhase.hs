@@ -43,8 +43,8 @@ length :: TimePhase -> Int
 length (TimePhase _ contents) = V.length contents
 
 format :: TimePhase -> TL.Text
-format (TimePhase _ contents) =
-    TLB.toLazyText $ "TimePhase " <> formatList (map formatImmanant $ V.toList contents)
+format (TimePhase _ contents) = TLB.toLazyText $
+    "TimePhase " <> formatList (map formatImmanant $ V.toList contents)
     where
         formatImmanant (AnyImmanantContent @c c) =
             case encodeImmanantContent c of

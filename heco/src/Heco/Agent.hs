@@ -35,10 +35,10 @@ import Heco.Effectful.LanguageToolProvider.Native (runNativeLanguageToolProvider
 import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
 import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps(..), runRingBufferInternalTimeStreamEx)
 import Heco.Effectful.TaskService (runStandardTaskServiceEx)
-import Heco.Effectful.Ego.Heco
+import Heco.Effectful.Agent.Heco
     ( hecoMemoryOps,
       immanantContentXMLFormatter,
-      runHecoEgoEx,
+      runHecoAgentEx,
       HecoMemoryOps(searchOps),
       HecoOps(..) )
 import Heco.Effectful.PortalService (runStandardPortalService, runPortal_)
@@ -162,7 +162,7 @@ runHecoAgent = do
             . runThrowEither . runRingBufferInternalTimeStreamEx RingBufferOps
                 { capacity = 20 }
             . runThrowEither . runNativeLanguageToolProviderEx
-            . runThrowEither . runHecoEgoEx hecoOps
+            . runThrowEither . runHecoAgentEx hecoOps
             . runStandardPortalService
 
     void $ runHeco do

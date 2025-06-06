@@ -1,6 +1,6 @@
 cabal-version: 3.0
 
-name:           heco-ego
+name:           heco-agent
 version:        0.1.0.0
 description:    Please see the README on GitHub at <https://github.com/sicusa/heco#readme>
 homepage:       https://github.com/sicusa/heco#readme
@@ -46,11 +46,12 @@ library
   exposed-modules:
     Heco.Data.Immanant.Memory,
     Heco.Data.Immanant.Terminal,
-    Heco.Data.EgoError,
-    Heco.Events.EgoEvent,
-    Heco.Effectful.Ego
+    Heco.Data.AgentError,
+    Heco.Events.AgentEvent,
+    Heco.Effectful.Agent
   build-depends:
     base,
+    extra,
     effectful-core,
     effectful-th,
     vector,
@@ -61,6 +62,7 @@ library
     hashable,
     cast,
     aeson,
+    heco-multitask,
     heco-language,
     heco-database,
     heco-subjectivity

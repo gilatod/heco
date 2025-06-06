@@ -371,6 +371,7 @@ runLdapAccountService ops = reinterpret wrap \_ -> \case
             { user = au.user { email = email } }
 
         trigger $ OnAccountEmailChanged session email
+
     where
         wrap e = do
             let state = ServiceState

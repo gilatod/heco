@@ -45,7 +45,7 @@ library
   default-language: GHC2024
   hs-source-dirs: src
   exposed-modules:
-    Heco.Effectful.Ego.Heco,
+    Heco.Effectful.Agent.Heco,
     Heco.Agent.AuthGroups,
     Heco.Agent.LanguageTools.Archives,
     Heco.Agent.LanguageTools.Downloader,
@@ -81,7 +81,7 @@ library
     heco-language,
     heco-database,
     heco-subjectivity,
-    heco-ego,
+    heco-agent,
     heco-portal
 
 executable heco-agent

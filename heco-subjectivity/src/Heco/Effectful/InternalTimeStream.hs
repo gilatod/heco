@@ -22,6 +22,15 @@ data InternalTimeStream :: Effect where
 
 makeEffect ''InternalTimeStream
 
+getLatestRetent ::
+    (HasCallStack, InternalTimeStream :> es)
+    => Eff es (Maybe TimePhase)
+getLatestRetent = do
+    retention <- getRetention
+    if V.length retention == 0
+        then pure Nothing
+        else pure $ Just $ retention V.! (V.length retention - 1)
+
 progressPresent_ ::
     (HasCallStack, InternalTimeStream :> es) => Eff es ()
 progressPresent_ = void progressPresent
@@ -30,6 +39,16 @@ present_ ::
     (HasCallStack, InternalTimeStream :> es)
     => Vector AnyImmanantContent -> Eff es ()
 present_ contents = void $ present contents
+
+presentList ::
+    (HasCallStack, InternalTimeStream :> es)
+    => [AnyImmanantContent] -> Eff es TimePhase
+presentList contents = present $ V.fromList contents
+
+presentList_ ::
+    (HasCallStack, InternalTimeStream :> es)
+    => [AnyImmanantContent] -> Eff es ()
+presentList_ contents = void $ presentList contents
 
 presentOne ::
     (HasCallStack, InternalTimeStream :> es, ImmanantContent c)

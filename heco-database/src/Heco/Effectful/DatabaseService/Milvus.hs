@@ -427,6 +427,7 @@ runMilvusDatabaseService ops = reinterpret (evalHttpManager ops.timeout) \_ -> \
                 { dbName = ops.database
                 , collectionName = col
                 , filter = filter }
+
     where
         insertionUrl = "/vectordb/entities/insert" :: Text
         upsertionUrl = "/vectordb/entities/upsert" :: Text

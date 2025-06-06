@@ -8,8 +8,8 @@ import Heco.Data.TimePhase (ImmanantContent)
 import Heco.Data.TimePhase qualified as TimePhase
 import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Effectful.HTTP (makeHttpManager)
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, present_, clearRetention, getRetention)
-import Heco.Effectful.Ego (Ego, interactEgo)
+import Heco.Effectful.InternalTimeStream (InternalTimeStream, clearRetention, getRetention, presentList_)
+import Heco.Effectful.Agent (Agent, withAgentInteraction)
 
 import Effectful (Eff, IOE, type (:>), MonadIO(..))
 import Effectful.Concurrent (Concurrent, myThreadId, killThread)
@@ -161,7 +161,7 @@ makeOneBotPortal :: forall es.
     , Resource :> es
     , Concurrent :> es
     , InternalTimeStream :> es
-    , Ego :> es )
+    , Agent :> es )
     => OneBotOps -> Portal (Eff es)
 makeOneBotPortal ops = Portal "onebot" \pid sigSrc -> do
     tid <- myThreadId
@@ -185,8 +185,8 @@ makeOneBotPortal ops = Portal "onebot" \pid sigSrc -> do
             if TL.length content > 0 && TL.head content == '/'
                 then handleCommands httpMgr event $
                     TL.toStrict $ TL.dropWhile isSpace content
-                else interactEgo do
-                    present_ $ V.fromList
+                else withAgentInteraction do
+                    presentList_
                         [ cast $ TerminalChat pid msg
                         , cast event ]
 

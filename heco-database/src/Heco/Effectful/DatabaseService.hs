@@ -6,7 +6,6 @@ import Heco.Data.Collection (CollectionName)
 
 import Effectful (Effect, (:>), Eff)
 import Effectful.TH (makeEffect)
-import Effectful.Dispatch.Dynamic (HasCallStack)
 
 import Data.Aeson.TH (deriveJSON)
 import Data.Text (Text)
@@ -84,18 +83,18 @@ data DatabaseService :: Effect where
 
 makeEffect ''DatabaseService
 
-addEntity_ :: (HasCallStack, DatabaseService :> es, Entity e)
+addEntity_ :: (DatabaseService :> es, Entity e)
     => CollectionName -> e -> Eff es ()
 addEntity_ c e = void $ addEntity c e
 
-addEntities_ :: (HasCallStack, DatabaseService :> es, Entity e)
+addEntities_ :: (DatabaseService :> es, Entity e)
     => CollectionName -> Vector e -> Eff es ()
 addEntities_ c es = void $ addEntities c es
 
-setEntity_ :: (HasCallStack, DatabaseService :> es, Entity e)
+setEntity_ :: (DatabaseService :> es, Entity e)
     => CollectionName -> e -> Eff es ()
 setEntity_ c e = void $ setEntity c e
 
-setEntities_ :: (HasCallStack, DatabaseService :> es, Entity e)
+setEntities_ :: (DatabaseService :> es, Entity e)
     => CollectionName -> Vector e -> Eff es ()
 setEntities_ c es = void $ setEntities c es

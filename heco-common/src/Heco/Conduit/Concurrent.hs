@@ -1,6 +1,7 @@
 module Heco.Conduit.Concurrent where
 
 import Effectful (Eff, (:>))
+import Effectful.Error.Dynamic (HasCallStack)
 import Effectful.Concurrent (Concurrent)
 import Effectful.Concurrent.STM
     ( atomically, newTChanIO, tryReadTChan, writeTChan, atomically )
@@ -12,7 +13,7 @@ import Conduit qualified as C
 import Control.Monad (void)
 
 mergeSources ::
-    (Concurrent :> es, m ~ Eff es)
+    (HasCallStack, Concurrent :> es, m ~ Eff es)
     => ConduitT () o m () -> ConduitT () o m () -> ConduitT () o m ()
 mergeSources src1 src2 = do
     chan <- C.lift newTChanIO

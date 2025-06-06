@@ -39,16 +39,7 @@ chatOps name = ChatOps
     , extra = mempty }
 
 chatOpsNoStream :: ModelName -> ChatOps
-chatOpsNoStream name = ChatOps
-    { modelName = name
-    , stream = False
-    , tools = []
-    , temperature = Nothing
-    , topP = Nothing
-    , maxToken = Nothing
-    , presencePenalty = Nothing
-    , frequencyPenalty = Nothing
-    , extra = mempty }
+chatOpsNoStream name = (chatOps name) { stream = False }
 
 data LanguageService :: Effect where
     Chat :: ChatOps -> Vector Message -> LanguageService m Message

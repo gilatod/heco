@@ -58,11 +58,14 @@ data ArchiveEntity = ArchiveEntity
 
 deriveEntity ''ArchiveEntity
 
-addArchive ::
-    ( Reader ArchiveToolOps :> es
-    , IOE :> es
+type HasArchiveToolEs es = 
+    ( IOE :> es
     , DatabaseService :> es
     , LanguageService :> es )
+
+addArchive ::
+    ( Reader ArchiveToolOps :> es
+    , HasArchiveToolEs es )
     => LanguageTool es
         "add"
         "向「荏苒之境图书馆」添加档案"
@@ -83,7 +86,7 @@ addArchive = LanguageTool \content -> do
 
 getArchive ::
     ( Reader ArchiveToolOps :> es
-    , DatabaseService :> es )
+    , HasArchiveToolEs es )
     => LanguageTool es
         "get"
         "在「荏苒之境图书馆」中使用档案ID来获取档案内容"
@@ -98,9 +101,7 @@ getArchive = LanguageTool \id -> do
 
 modifyArchive ::
     ( Reader ArchiveToolOps :> es
-    , IOE :> es
-    , DatabaseService :> es
-    , LanguageService :> es )
+    , HasArchiveToolEs es )
     => LanguageTool es
         "modify"
         "修改「荏苒之境图书馆」中的档案"
@@ -134,7 +135,7 @@ modifyArchive = LanguageTool \id content -> do
 
 removeArchive ::
     ( Reader ArchiveToolOps :> es
-    , DatabaseService :> es )
+    , HasArchiveToolEs es )
     => LanguageTool es
         "remove"
         "从「荏苒之境图书馆」中删除档案"
@@ -146,7 +147,7 @@ removeArchive = LanguageTool \id -> do
 
 searchArchive ::
     ( Reader ArchiveToolOps :> es
-    , DatabaseService :> es )
+    , HasArchiveToolEs es )
     => LanguageTool es
         "search"
         "搜索档案"
@@ -163,9 +164,7 @@ searchArchive = LanguageTool \keywords limit -> do
     pure [aesonQQ|{ count: #{V.length res}, results: #{res} }|]
 
 archivesToolModule ::
-    ( IOE :> es
-    , DatabaseService :> es
-    , LanguageService :> es
+    ( HasArchiveToolEs es
     , Error LanguageToolError :> es )
     => ArchiveToolOps -> LanguageToolModule "archives" (Eff es)
 archivesToolModule ops = emptyModuleBuilder

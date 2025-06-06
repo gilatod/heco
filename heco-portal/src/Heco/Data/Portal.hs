@@ -1,6 +1,6 @@
 module Heco.Data.Portal where
 
-import Heco.Data.Immanant.Terminal (TerminalId)
+import Heco.Data.Immanant.Terminal (SessionId)
 import Heco.Data.TimePhase (TimePhase)
 
 import Data.Conduit (ConduitT)
@@ -13,5 +13,5 @@ data PortalSignal
     | PortalClose
 
 type PortalSignalSource m = ConduitT () PortalSignal m ()
-type PortalProcedure m = HasCallStack => TerminalId -> PortalSignalSource m -> m ()
+type PortalProcedure m = HasCallStack => SessionId -> PortalSignalSource m -> m ()
 data Portal m = Portal Text (PortalProcedure m)

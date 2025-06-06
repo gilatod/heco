@@ -4,11 +4,15 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Time (NominalDiffTime, UTCTime, TimeOfDay)
 import Data.Hashable (Hashable)
+import Pattern.Cast (Cast(..))
 
 newtype TaskId = TaskId Int
     deriving (Show, Eq, Ord, Enum, Bounded)
     deriving Num via Int
     deriving newtype Hashable
+    
+instance Cast TaskId Int where
+    cast (TaskId id) = id
 
 data TaskTrigger
     = OneShotTrigger
@@ -24,13 +28,6 @@ data TaskStage
     | RunningStage
     | ScheduledStage
     | StoppedStage
-    deriving (Eq, Show)
-
-data TaskStatus = TaskStatus
-    { stage :: TaskStage
-    , createTime :: UTCTime
-    , lastRunTime :: Maybe UTCTime
-    , lastCompleteTime :: Maybe UTCTime  }
     deriving (Eq, Show)
 
 data Task m = Task

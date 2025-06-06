@@ -12,7 +12,6 @@ import Heco.Data.Record (RecordFieldsEx(..), FieldInfoEx(..), recordFieldsEx)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
-import Data.Text.Lazy.Encoding qualified as TL
 
 import Data.Vector qualified as V
 import Data.Vector.Primitive qualified as VP
@@ -27,6 +26,7 @@ import Data.Map.Strict qualified as Map
 import Data.Aeson (Key, FromJSON, ToJSON(..), Encoding, (.=), pairs, KeyValue(..), (.:), (.:?))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as Aeson
+import Data.Aeson.Text qualified as Aeson
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap (KeyMap)
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -681,7 +681,7 @@ instance (Enum t, Bounded t, ToJSON t) => HasDataSchema (EnumDefault t) where
     dataSchema = StringEnumSchema $
         ([minBound..maxBound] :: [t]) & map \v ->
             EnumOption
-                { value = TL.toStrict $ TL.decodeUtf8 $ Aeson.encode v
+                { value = TL.toStrict $ Aeson.encodeToLazyText v
                 , description = Nothing }
 
 instance (Enum t, Bounded t, ToJSON t, KnownSymbols descs)
@@ -690,5 +690,5 @@ instance (Enum t, Bounded t, ToJSON t, KnownSymbols descs)
         zipWith doZip ([minBound..maxBound] :: [t]) $ symbolValues @descs
         where
             doZip v desc = EnumOption
-                { value = TL.toStrict $ TL.decodeUtf8 $ Aeson.encode v
+                { value = TL.toStrict $ Aeson.encodeToLazyText v
                 , description = Just $ T.pack desc }

@@ -31,7 +31,8 @@ data Event e :: Effect where
 
 makeEffect ''Event
 
-listen_ :: (HasCallStack, Event e :> es)
+listen_ ::
+    Event e :> es
     => (e -> Eff es ()) -> Eff es ()
 listen_ f = void $ listen f
 

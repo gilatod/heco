@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE QuasiQuotes #-}
 
-module Heco.Effectful.Ego.Heco where
+module Heco.Effectful.Agent.Heco where
 
 import Heco.Data.Default ()
 import Heco.Data.Model (ModelName)
@@ -23,9 +23,9 @@ import Heco.Data.Message
       ToolCall(id, name, arguments),
       ToolResponse(content, ToolResponse, id, name) )
 import Heco.Data.LanguageError (LanguageError)
-import Heco.Data.EgoError (EgoError(..))
+import Heco.Data.AgentError (AgentError(..))
 import Heco.Data.TimePhase qualified as TimePhase
-import Heco.Events.EgoEvent (EgoEvent(..))
+import Heco.Events.AgentEvent (AgentEvent(..))
 import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(..))
 import Heco.Effectful.Event (Event, trigger, runEvent, collect)
 import Heco.Effectful.DatabaseService
@@ -44,7 +44,7 @@ import Heco.Effectful.InternalTimeStream
       getRetention,
       getPresent,
       progressPresent_, presentOne_ )
-import Heco.Effectful.Ego (Ego(..))
+import Heco.Effectful.Agent (Agent(..))
 
 import Effectful (Eff, (:>), MonadIO (liftIO), IOE)
 import Effectful.Dispatch.Dynamic (localSeqUnlift, HasCallStack, reinterpret)
@@ -77,6 +77,7 @@ import Data.String (IsString(fromString))
 import Data.Aeson.QQ (aesonQQ)
 import Data.Char (isSpace)
 
+import Control.Applicative ((<|>))
 import Control.Monad (forM, unless, (>=>))
 import Control.Monad.Extra (whenJustM)
 import Pattern.Cast (Cast(cast))
@@ -152,7 +153,7 @@ timePhaseToMessasge ops (TimePhase unique contents) = do
             msg <- if V.length contents == 0
                 then newUserMessage ""
                 else case castImmanantContent $ contents V.! 0 of
-                    Just (TerminalReply msg) -> pure msg
+                    Just (TerminalReply _ msg) -> pure msg
                     _ -> createUserMsg contents
             modify $ LRU.insert unique msg
             pure msg
@@ -199,12 +200,12 @@ wrapInteraction ::
     , State (LRU Unique Message) :> es
     , Reader HecoInternal :> es
     , Reader QSem :> es
-    , Event EgoEvent :> es
+    , Event AgentEvent :> es
     , Event InternalTimeStreamEvent :> es
     , Error LanguageError :> es
-    , Error EgoError :> es )
-    => HecoOps -> Eff es a -> Eff es a
-wrapInteraction ops eff = do
+    , Error AgentError :> es )
+    => HecoOps -> Maybe TimePhase -> Eff es a -> Eff es a
+wrapInteraction ops replyingTimePhase eff = do
     startInteraction
     flip finally finalizeInteraction do
         (res, lostPhases) <- eff `collect` \case
@@ -216,7 +217,7 @@ wrapInteraction ops eff = do
         startInteraction = do
             ask @QSem >>= waitQSem
             progressPresent_
-            trigger OnEgoInteractionStarted
+            trigger OnAgentInteractionStarted
 
         respond lostPhases1 = do
             injectMemory ops
@@ -246,46 +247,45 @@ wrapInteraction ops eff = do
                             VM.write messages (retentionCount + 1) presentMessage
                             pure messages
 
-            trigger $ OnEgoInputMessagesGenerated messages
+            trigger $ OnAgentInputMessagesGenerated messages
 
             schemas <- getLanguageToolSchemas
             let chatOps = ops.chatOps { tools = schemas ++ ops.chatOps.tools }
 
             ((msg, prevMsgs), lostPhases2) <-
-                runReader (Just present) $ doChat chatOps messages
+                runReader (replyingTimePhase <|> Just present) $
+                    finally (doChat chatOps messages) progressPresent_
                     `collect` \case
                         OnTimePhaseLost timePhase -> pure $ Just timePhase
                         _ -> pure Nothing
 
             let lostPhases = lostPhases1 ++ lostPhases2
             unless (null lostPhases) do
-                runReader (Nothing :: Maybe TimePhase) $ runReader chatOps $
+                runReader (Nothing :: Maybe TimePhase) do
                     memorizeLostPhases
-                        internal.memorizingPrompt (prevMsgs <> V.singleton msg) lostPhases
+                        chatOps internal.memorizingPrompt (prevMsgs <> V.singleton msg) lostPhases
 
-            trigger $ OnEgoInteractionCompleted msg
+            trigger $ OnAgentInteractionCompleted msg
 
         finalizeInteraction = do
             ask @QSem >>= signalQSem
 
-        memorizeLostPhases _ _ [] = pure ()
-        memorizeLostPhases prompt msgs (Nothing:restPhases) = memorizeLostPhases prompt msgs restPhases
-        memorizeLostPhases prompt msgs (Just timePhase:restPhases) = do
+        memorizeLostPhases _ _ _ [] = pure ()
+        memorizeLostPhases chatOps prompt msgs (Nothing:restPhases) =
+            memorizeLostPhases chatOps prompt msgs restPhases
+        memorizeLostPhases chatOps prompt msgs (Just timePhase:restPhases) = do
+            let doMemorize = memorizeText chatOps prompt msgs
+                memorizeRest = memorizeLostPhases chatOps prompt msgs restPhases
             phaseMsg <- timePhaseToMessasge ops timePhase
             case phaseMsg of
-                UserMessage _ text -> do
-                    memorizeText prompt msgs text
-                    memorizeLostPhases prompt msgs restPhases
-                AssistantMessage _ statement reasoning _ -> do
-                    memorizeText prompt msgs statement
-                    memorizeText prompt msgs reasoning
-                    memorizeLostPhases prompt msgs restPhases
-                _ -> do
-                    memorizeLostPhases prompt msgs restPhases
+                UserMessage _ text ->
+                    doMemorize text >> memorizeRest
+                AssistantMessage _ statement reasoning _ ->
+                    doMemorize statement >> doMemorize reasoning >> memorizeRest
+                _ -> memorizeRest
 
-        memorizeText prompt prevMsgs content = do
+        memorizeText chatOps prompt prevMsgs content = do
             promptMsg <- newUserMessage $ prompt <> "\n" <> content
-            chatOps <- ask @ChatOps
             (msg, _) <- doChat chatOps $ prevMsgs <> V.singleton promptMsg
 
             let summary = messageText msg
@@ -307,44 +307,45 @@ wrapInteraction ops eff = do
                     liftIO $ putStrLn "Error found, retrying..."
                     doChat chatOps messages
                 Right msg -> do
-                    whenJustM (ask @(Maybe TimePhase)) $ const do
+                    whenJustM (ask @(Maybe TimePhase)) \phase -> do
                         progressPresent_
-                        presentOne_ $ TerminalReply msg
+                        presentOne_ $ TerminalReply phase msg
                         progressPresent_
                     handleReceivedMsg chatOps messages msg
 
         handleReceivedMsg chatOps messages = \case
             msg@(AssistantMessage _ statement _ []) -> do
-                sendReplyEvents statement
+                trySendReply statement
                 pure (msg, messages)
 
             msg@(AssistantMessage _ statement _ toolCalls) -> do
                 unless (T.all isSpace statement) do
-                    sendReplyEvents statement
+                    trySendReply statement
                 respMsgs <- forM toolCalls \t -> do
                     result <- invokeLanguageTool t.name t.arguments
                     let resp = ToolResponse
                             { id = t.id
                             , name = t.name
                             , content = either (fromString . displayException) id result }
-                    trigger $ OnEgoToolUsed t resp
+                    trigger $ OnAgentToolUsed t resp
                     toolMsg <- newToolMessage resp
-                    whenJustM (ask @(Maybe TimePhase)) $ const do
-                        presentOne_ $ TerminalReply toolMsg
+                    whenJustM (ask @(Maybe TimePhase)) \phase -> do
+                        presentOne_ $ TerminalReply phase toolMsg
                         progressPresent_
                     pure toolMsg
                 doChat chatOps $ messages <> V.fromList (msg:respMsgs)
 
-            msg -> throwError $ EgoInvalidReplyError $
+            msg -> throwError $ AgentInvalidReplyError $
                 "invalid message from message service: " ++ show msg
 
-        sendReplyEvents content =
+        trySendReply content =
             whenJustM ask \present ->
                 case TimePhase.getImmanantContent @Terminal present of
-                    Just (TerminalChat id _) -> trigger $ OnEgoReply present id content
+                    Just (TerminalChat id _) -> trigger $ OnAgentReply present id content
+                    Just (TerminalTaskResponse id _ _) -> trigger $ OnAgentReply present id content
                     _ -> pure ()
 
-runHecoEgo :: forall es a.
+runHecoAgent :: forall es a.
     ( HasCallStack
     , IOE :> es
     , Concurrent :> es
@@ -352,15 +353,15 @@ runHecoEgo :: forall es a.
     , LanguageService :> es
     , LanguageToolProvider :> es
     , InternalTimeStream :> es
-    , Event EgoEvent :> es
+    , Event AgentEvent :> es
     , Event InternalTimeStreamEvent :> es
-    , Error EgoError :> es
+    , Error AgentError :> es
     , Error LanguageError :> es )
-    => HecoOps -> Eff (Ego : es) a -> Eff es a
-runHecoEgo ops = reinterpret wrap \env -> \case
-    InteractEgo eff ->
+    => HecoOps -> Eff (Agent : es) a -> Eff es a
+runHecoAgent ops = reinterpret wrap \env -> \case
+    WithAgentInteractionEx replyingPhase eff ->
         localSeqUnlift env \unlift ->
-            wrapInteraction ops (unlift eff)
+            wrapInteraction ops replyingPhase (unlift eff)
     where
         wrap e = do
             initialPrompt <- newSystemMessage $ ops.characterPrompt <> "\n\n" <> ops.taskPrompt
@@ -371,7 +372,7 @@ runHecoEgo ops = reinterpret wrap \env -> \case
                     { initialMessage = initialPrompt
                     , memorizingPrompt = ops.memorizingPrompt }
 
-runHecoEgoEx ::
+runHecoAgentEx ::
     ( HasCallStack
     , IOE :> es
     , Concurrent :> es
@@ -382,7 +383,7 @@ runHecoEgoEx ::
     , Event InternalTimeStreamEvent :> es
     , Error LanguageError :> es )
     => HecoOps
-    -> Eff (Ego : Event EgoEvent : Error EgoError : es) a
-    -> Eff es (Either (CallStack, EgoError) a)
-runHecoEgoEx ops =
-    runError. runEvent . runHecoEgo ops
+    -> Eff (Agent : Event AgentEvent : Error AgentError : es) a
+    -> Eff es (Either (CallStack, AgentError) a)
+runHecoAgentEx ops =
+    runError. runEvent . runHecoAgent ops

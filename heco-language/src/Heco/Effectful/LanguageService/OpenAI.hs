@@ -76,14 +76,16 @@ data OpenAIOps = OpenAIOps
     { url :: Text
     , timeout :: Maybe Int
     , token :: Maybe Text
-    , messageCacheLimit :: Int }
+    , messageCacheLimit :: Int
+    , maxEmbeddingLength :: Int }
 
 openaiOps :: Text -> OpenAIOps
 openaiOps url = OpenAIOps
     { url = url
     , timeout = Nothing
     , token = Nothing
-    , messageCacheLimit = 64 }
+    , messageCacheLimit = 64
+    , maxEmbeddingLength = 4096 }
 
 newtype OpenAIErrorMetadata = OpenAIErrorMetadata
     { raw :: Text }
@@ -438,7 +440,7 @@ runOpenAILanguageService ops = reinterpret wrap \env -> \case
         pure msg
 
     Embed (ModelName name) text -> do
-        let vec = V.singleton text
+        let vec = V.singleton $ T.take ops.maxEmbeddingLength text
         embeddings <- embedImpl ops OpenAIEmbeddingOps
             { model = name
             , input = vec
@@ -449,7 +451,7 @@ runOpenAILanguageService ops = reinterpret wrap \env -> \case
     EmbedMany (ModelName name) texts -> do
         embeddings <- embedImpl ops OpenAIEmbeddingOps
             { model = name
-            , input = texts
+            , input = V.map (T.take ops.maxEmbeddingLength) texts
             , encoding_format = "float" }
         trigger $ OnEmbeddingsReceived texts embeddings
         pure embeddings

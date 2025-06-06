@@ -64,7 +64,7 @@ runRingBufferInternalTimeStream ops = reinterpret wrap \_ -> \case
     Present newContents -> do
         state <- ask @ServiceState
         modifyMVar state.present \(TimePhase uuid contents) -> do
-            let enriched = TimePhase uuid $ newContents <> contents
+            let enriched = TimePhase uuid $ contents <> newContents
             trigger $ OnTimePhaseEnriched enriched newContents
             pure (enriched, enriched)
 
