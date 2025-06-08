@@ -165,7 +165,7 @@ makeOneBotPortal :: forall es.
     => OneBotOps -> Portal (Eff es)
 makeOneBotPortal ops = Portal "onebot" \pid sigSrc -> do
     tid <- myThreadId
-    httpMgr <- liftIO $ makeHttpManager ops.webapiTimeout
+    httpMgr <- makeHttpManager ops.webapiTimeout
     C.runConduit $ mergeSources
         (oneBotWebsocketSource ops .| readEvent pid httpMgr)
         (sigSrc .| handleSigSrc tid httpMgr)

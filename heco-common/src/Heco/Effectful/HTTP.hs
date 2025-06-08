@@ -19,7 +19,7 @@ import Network.TLS
 
 import Data.Default (def)
 
-makeHttpManager :: Maybe Int -> IO Manager
+makeHttpManager :: IOE :> es => Maybe Int -> Eff es Manager
 makeHttpManager timeout = do
     let tlsSettings = def
             { settingClientSupported = def
@@ -29,10 +29,10 @@ makeHttpManager timeout = do
                 maybe responseTimeoutNone
                     (\timeout -> responseTimeoutMicro $ timeout * 1000000)
                     timeout }
-    newManager tlsManagerSettings
+    liftIO $ newManager tlsManagerSettings
 
 evalHttpManager ::
     IOE :> es => Maybe Int -> Eff (Reader Manager : es) b -> Eff es b
 evalHttpManager timeout e = do
-    manager <- liftIO $ makeHttpManager timeout
+    manager <- makeHttpManager timeout
     runReader manager e

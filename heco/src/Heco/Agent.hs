@@ -16,7 +16,7 @@ import Heco.Effectful.DatabaseService
     ( SearchOps(..) )
 import Heco.Events.LanguageEvent (LanguageEvent(..))
 import Heco.Effectful.Exception (runThrowEither)
-import Heco.Effectful.Event (Event, runEvent)
+import Heco.Effectful.Event (Event, runEvent, listen_)
 import Heco.Effectful.LanguageService
     ( LanguageService(..), ChatOps(..), chatOps )
 import Heco.Effectful.AccountService.Ldap
@@ -46,7 +46,7 @@ import Heco.Agent.LanguageTools.Archives (archivesToolModule, ArchiveToolOps(..)
 import Heco.Agent.LanguageTools.Downloader (downloaderToolModule)
 import Heco.Agent.AuthGroups (authGroups)
 
-import Effectful (runEff, Eff, IOE, (:>))
+import Effectful (runEff, Eff, IOE, (:>), MonadIO (liftIO))
 import Effectful.Fail (runFailIO)
 import Effectful.Concurrent (runConcurrent, threadDelay)
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, send)
@@ -63,6 +63,7 @@ import Data.Default (Default(..))
 
 import Control.Monad (forever, void)
 import GHC.Generics (Generic)
+import Heco.Events.AgentEvent (AgentEvent(..))
 
 runCombinedLanguageService ::
     (HasCallStack, IOE :> es)
@@ -102,7 +103,7 @@ ollamaOps = OllamaOps
 
 makeOpenAIOps :: IO OpenAIOps
 makeOpenAIOps = do
-    token <- readFile "./tokens/ali.txt"
+    token <- readFile "./tokens/aliyun.txt"
     pure $ (openaiOps "https://dashscope.aliyuncs.com/compatible-mode/v1")
         { token = Just $ T.pack token }
 
@@ -166,6 +167,15 @@ runHecoAgent = do
             . runStandardPortalService
 
     void $ runHeco do
+        liftIO $ putStrLn "Heco is running."
+
+        listen_ \case
+            OnAgentToolInvoked call resp -> do
+                liftIO $ print call
+                liftIO $ putStr ">>> "
+                liftIO $ print resp
+            _ -> pure ()
+
         modifyLangaugeToolRegistry
             $ Registry.addModule
                 (archivesToolModule ArchiveToolOps

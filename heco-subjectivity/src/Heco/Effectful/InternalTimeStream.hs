@@ -22,6 +22,35 @@ data InternalTimeStream :: Effect where
 
 makeEffect ''InternalTimeStream
 
+progressPresent_ ::
+    (HasCallStack, InternalTimeStream :> es) => Eff es ()
+progressPresent_ = void progressPresent
+
+present_ ::
+    InternalTimeStream :> es
+    => Vector AnyImmanantContent -> Eff es ()
+present_ contents = void $ present contents
+
+presentList ::
+    InternalTimeStream :> es
+    => [AnyImmanantContent] -> Eff es TimePhase
+presentList contents = present $ V.fromList contents
+
+presentList_ ::
+    InternalTimeStream :> es
+    => [AnyImmanantContent] -> Eff es ()
+presentList_ contents = void $ presentList contents
+
+presentOne ::
+    (InternalTimeStream :> es, ImmanantContent c)
+    => c -> Eff es TimePhase
+presentOne content = present $ V.singleton $ AnyImmanantContent content
+
+presentOne_ ::
+    (InternalTimeStream :> es, ImmanantContent c)
+    => c -> Eff es ()
+presentOne_ content = void $ presentOne content
+
 getLatestRetent ::
     (HasCallStack, InternalTimeStream :> es)
     => Eff es (Maybe TimePhase)
@@ -30,32 +59,3 @@ getLatestRetent = do
     if V.length retention == 0
         then pure Nothing
         else pure $ Just $ retention V.! (V.length retention - 1)
-
-progressPresent_ ::
-    (HasCallStack, InternalTimeStream :> es) => Eff es ()
-progressPresent_ = void progressPresent
-
-present_ ::
-    (HasCallStack, InternalTimeStream :> es)
-    => Vector AnyImmanantContent -> Eff es ()
-present_ contents = void $ present contents
-
-presentList ::
-    (HasCallStack, InternalTimeStream :> es)
-    => [AnyImmanantContent] -> Eff es TimePhase
-presentList contents = present $ V.fromList contents
-
-presentList_ ::
-    (HasCallStack, InternalTimeStream :> es)
-    => [AnyImmanantContent] -> Eff es ()
-presentList_ contents = void $ presentList contents
-
-presentOne ::
-    (HasCallStack, InternalTimeStream :> es, ImmanantContent c)
-    => c -> Eff es TimePhase
-presentOne content = present $ V.singleton $ AnyImmanantContent content
-
-presentOne_ ::
-    (HasCallStack, InternalTimeStream :> es, ImmanantContent c)
-    => c -> Eff es ()
-presentOne_ content = void $ presentOne content

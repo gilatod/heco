@@ -1,7 +1,7 @@
 module Heco.Effectful.LanguageToolProvider.Native where
 
 import Heco.Data.MonoHFunctor (MonoHFunctor(..))
-import Heco.Data.LanguageToolError (LanguageToolError(LanguageToolNotFoundError))
+import Heco.Data.LanguageToolError (LanguageToolError(..))
 import Heco.Data.LanguageTool (LanguageToolSpec(..))
 import Heco.Data.LanguageToolRegistry qualified as Registry
 import Heco.Data.LanguageToolRegistry (LanguageToolRegistry(..))
@@ -51,7 +51,7 @@ runNativeLanguageToolProvider = runNative . interpret \_ -> \case
                 localLiftUnlift env unliftStrategy \lift unlift ->
                     modify \s ->
                         let s' = f $ ohmap (lift . raise) s
-                        in ohmap (evalState Registry.empty . unlift) s'
+                        in ohmap (evalState s . unlift) s'
         unliftStrategy = ConcUnlift Persistent Unlimited
 
 runNativeLanguageToolProviderEx ::

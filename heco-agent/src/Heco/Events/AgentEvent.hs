@@ -12,4 +12,4 @@ data AgentEvent
     | OnAgentInteractionCompleted Message
     | OnAgentInputMessagesGenerated (Vector Message)
     | OnAgentReply TimePhase SessionId Text
-    | OnAgentToolUsed ToolCall ToolResponse
+    | OnAgentToolInvoked ToolCall ToolResponse

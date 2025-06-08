@@ -16,8 +16,8 @@ import Heco.Data.Entity.TH (deriveEntity)
 import Heco.Data.Model (ModelName)
 import Heco.Data.Collection (CollectionName)
 import Heco.Effectful.DatabaseService
-    ( SearchData(TextData),
-      SearchOps(limit, vectorField),
+    ( SearchData(TextData, DenseVectorData),
+      SearchOps(..),
       DatabaseService,
       addEntity,
       deleteEntities,
@@ -31,6 +31,7 @@ import Effectful.Error.Dynamic (Error)
 import Effectful.Reader.Dynamic (Reader, ask, runReader)
 
 import Data.Text (Text)
+import Data.Text qualified  as T
 import Data.Vector qualified as V
 import Data.Vector.Unboxing qualified as VU
 import Data.Aeson (Value (Object), ToJSON (toJSON))
@@ -116,22 +117,19 @@ modifyArchive = LanguageTool \id content -> do
         doModify ops content entity = do
             embedding <- embed ops.embeddingModel content
             time <- liftIO getCurrentTime
-            let metadata = case entity.metadata of
-                    Just (Object map) ->
-                        let createTime = fromMaybe (toJSON time) $ KeyMap.lookup "create_time" map
-                        in [aesonQQ|{
-                            create_time: #{createTime},
-                            modify_time: #{time}
-                        }|]
-                    _ -> [aesonQQ|{
-                        create_time: #{time},
-                        modify_time: #{time}
-                    }|]
             setEntity_ ops.collectionName entity
                 { vector = Just embedding
                 , content = Just content
-                , metadata = Just metadata }
+                , metadata = Just $ updateMetadata time entity.metadata }
             pure [aesonQQ|{ status: "success" }|]
+
+        updateMetadata time = \case
+            Just (Object map) ->
+                Object $ KeyMap.insert "create_time" (toJSON time) map
+            _ -> [aesonQQ|{
+                create_time: #{time},
+                modify_time: #{time}
+            }|]
 
 removeArchive ::
     ( Reader ArchiveToolOps :> es
@@ -150,16 +148,37 @@ searchArchive ::
     , HasArchiveToolEs es )
     => LanguageTool es
         "search"
-        "搜索档案"
+        "在「荏苒之境图书馆」中搜索档案"
         ( ParamDesc "keywords" Text "关键词"
+        -> MaybeParamDesc "exclude_ids" [Int] "在搜索结果中排除的档案ID（例如用于排除之前已经搜索到的档案）"
         -> MaybeParamDesc "limit" Int "搜索数量限制"
         -> Ret Value)
-searchArchive = LanguageTool \keywords limit -> do
+searchArchive = LanguageTool \keywords excludeIds limit -> do
     ops <- ask @ArchiveToolOps
     let searchOps = def
             { vectorField = "sparse_vector"
-            , limit = limit <|> Just 10 }
+            , limit = limit <|> Just 10
+            , filter = excludeIds >>= \ids -> Just $ "id NOT IN " <> T.pack (show ids) }
         searchData = V.singleton $ TextData keywords
+    res <- searchEntities @ArchiveEntity ops.collectionName searchOps searchData
+    pure [aesonQQ|{ count: #{V.length res}, results: #{res} }|]
+
+fuzzySearchArchive ::
+    ( Reader ArchiveToolOps :> es
+    , HasArchiveToolEs es )
+    => LanguageTool es
+        "fuzzy_search"
+        "在「荏苒之境图书馆」中模糊搜索档案"
+        ( ParamDesc "fragments" (V.Vector Text) "用于进行模糊搜索的相似档案片段"
+        -> MaybeParamDesc "exclude_ids" [Int] "在搜索结果中排除的档案ID（例如用于排除之前已经搜索到的档案）"
+        -> MaybeParamDesc "limit" Int "搜索数量限制"
+        -> Ret Value)
+fuzzySearchArchive = LanguageTool \fragments excludeIds limit -> do
+    ops <- ask @ArchiveToolOps
+    let searchOps = def
+            { limit = limit <|> Just 10
+            , filter = excludeIds >>= \ids -> Just $ "id NOT IN " <> T.pack (show ids) }
+    searchData <- traverse (fmap DenseVectorData . embed ops.embeddingModel) fragments
     res <- searchEntities @ArchiveEntity ops.collectionName searchOps searchData
     pure [aesonQQ|{ count: #{V.length res}, results: #{res} }|]
 
@@ -173,4 +192,5 @@ archivesToolModule ops = emptyModuleBuilder
     & addTool getArchive
     & addTool modifyArchive
     & addTool searchArchive
+    & addTool fuzzySearchArchive
     & toModule & ohmap (runReader ops)

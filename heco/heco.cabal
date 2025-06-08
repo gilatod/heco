@@ -62,6 +62,8 @@ library
     containers,
     unordered-containers,
     text,
+    bytestring,
+    pandoc,
     data-default,
     cast,
     aeson,

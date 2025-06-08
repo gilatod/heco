@@ -33,13 +33,22 @@ formatToolCall t =
     where
         formatPair (k, v) =
             TLB.fromText k <> " = " <>
-            TLB.fromLazyText (Aeson.encodeToLazyText v)
+            Aeson.encodeToTextBuilder v
 
 data ToolResponse = ToolResponse
     { id :: Text
     , name :: Text
     , content :: Value }
-    deriving (Eq, Show)
+    deriving (Eq)
+
+instance Show ToolResponse where
+    show = TL.unpack . formatToolResponse
+
+formatToolResponse :: ToolResponse -> TL.Text
+formatToolResponse resp =
+    TLB.toLazyText $
+        "ToolResponse <" <> TLB.fromText resp.name <> "> " <>
+        Aeson.encodeToTextBuilder resp.content
 
 data Message
     = SystemMessage Unique Text
@@ -86,9 +95,7 @@ formatMessage :: Message -> TL.Text
 formatMessage = \case
     SystemMessage _ t -> "System: " <> TL.fromStrict t
     UserMessage _ t -> "User: " <> TL.fromStrict t
-    ToolMessage _ r -> TLB.toLazyText $
-        "ToolResponse <" <> TLB.fromText r.name <> ">: " <>
-        TLB.fromLazyText (Aeson.encodeToLazyText r.content)
+    ToolMessage _ r -> "System: " <> formatToolResponse r
     AssistantMessage _ statement reasoning c ->
         "Assistant: " <> reasoningSection <> TL.fromStrict statement <>
             mconcat (map ((" " <>) . formatToolCall) c)

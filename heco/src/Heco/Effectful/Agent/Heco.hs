@@ -21,7 +21,7 @@ import Heco.Data.Message
       newUserMessage,
       Message(ToolMessage, UserMessage, AssistantMessage),
       ToolCall(id, name, arguments),
-      ToolResponse(content, ToolResponse, id, name) )
+      ToolResponse(content, ToolResponse, id, name), formatToolCall, formatToolResponse )
 import Heco.Data.LanguageError (LanguageError)
 import Heco.Data.AgentError (AgentError(..))
 import Heco.Data.TimePhase qualified as TimePhase
@@ -31,13 +31,13 @@ import Heco.Effectful.Event (Event, trigger, runEvent, collect)
 import Heco.Effectful.DatabaseService
     ( SearchOps(..),
       DatabaseService,
-      searchEntities, SearchData (DenseVectorData), addEntity_ )
+      searchEntities, SearchData(DenseVectorData), addEntity_ )
 import Heco.Effectful.LanguageService
     ( chat, embed, ChatOps(tools), LanguageService )
 import Heco.Effectful.LanguageToolProvider
     ( LanguageToolProvider,
       getLanguageToolSchemas,
-      invokeLanguageTool ) 
+      invokeLanguageTool )
 import Heco.Effectful.InternalTimeStream
     ( InternalTimeStream,
       present_,
@@ -113,9 +113,9 @@ immanantContentXMLFormatter (AnyImmanantContent c) =
         [c] -> "<" <> TLB.fromText c <> xmlAttrs <> "/>"
         c:cs ->
             let cb = TLB.fromText c
-            in "<" <> cb <> xmlAttrs <> ">\n"
-            <> mconcat (intersperse ":" $ map TLB.fromText cs)
-            <> "\n</" <> cb <> ">"
+            in "<" <> cb <> xmlAttrs <> ">\n" <>
+                mconcat (intersperse ":" $ map TLB.fromText cs) <>
+                "\n</" <> cb <> ">"
     where
         xmlAttrs = case getImmanantContentAttributes c of
             [] -> mempty
@@ -251,7 +251,6 @@ wrapInteraction ops replyingTimePhase eff = do
 
             schemas <- getLanguageToolSchemas
             let chatOps = ops.chatOps { tools = schemas ++ ops.chatOps.tools }
-
             ((msg, prevMsgs), lostPhases2) <-
                 runReader (replyingTimePhase <|> Just present) $
                     finally (doChat chatOps messages) progressPresent_
@@ -280,8 +279,18 @@ wrapInteraction ops replyingTimePhase eff = do
             case phaseMsg of
                 UserMessage _ text ->
                     doMemorize text >> memorizeRest
-                AssistantMessage _ statement reasoning _ ->
-                    doMemorize statement >> doMemorize reasoning >> memorizeRest
+                AssistantMessage _ statement reasoning tools -> do
+                    doMemorize $ TL.toStrict $
+                        mconcat (map (\t -> "<tool_call>\n" <> formatToolCall t <> "\n</tool_call>\n") tools) <>
+                        (if T.null reasoning
+                            then mempty
+                            else "<think>\n" <> TL.fromStrict reasoning <> "\n</think>\n") <>
+                        TL.fromStrict statement
+                    memorizeRest
+                ToolMessage _ resp -> do
+                    doMemorize $ TL.toStrict $
+                        "<tool_response>\n" <> formatToolResponse resp <> "\n</tool_response>\n"
+                    memorizeRest
                 _ -> memorizeRest
 
         memorizeText chatOps prompt prevMsgs content = do
@@ -327,7 +336,7 @@ wrapInteraction ops replyingTimePhase eff = do
                             { id = t.id
                             , name = t.name
                             , content = either (fromString . displayException) id result }
-                    trigger $ OnAgentToolUsed t resp
+                    trigger $ OnAgentToolInvoked t resp
                     toolMsg <- newToolMessage resp
                     whenJustM (ask @(Maybe TimePhase)) \phase -> do
                         presentOne_ $ TerminalReply phase toolMsg
