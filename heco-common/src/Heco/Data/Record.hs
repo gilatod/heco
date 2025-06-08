@@ -60,4 +60,4 @@ instance RecordFieldsEx c ex M1 where
 recordFieldsEx :: forall t c ex. RecordFieldsEx c ex (Rep t)
     => (forall f. c f => Proxy f -> ex)
     -> [FieldInfoEx ex]
-recordFieldsEx f = recordFieldsExImpl @c @ex @(Rep t) f
+recordFieldsEx = recordFieldsExImpl @c @ex @(Rep t)

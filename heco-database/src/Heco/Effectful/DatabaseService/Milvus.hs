@@ -11,17 +11,17 @@ module Heco.Effectful.DatabaseService.Milvus
 
 import Heco.Network.HTTP.Client (httpPost)
 import Heco.Data.Aeson (defaultAesonOps)
-import Heco.Data.Entity (EntityId(..), entityDataFields, Entity)
+import Heco.Data.Entity (EntityId(..), entityDataFields, Entity, SomeEntity(..))
 import Heco.Data.DatabaseError (DatabaseError(..))
 import Heco.Data.Collection (CollectionName(CollectionName))
 import Heco.Events.DatabaseEvent (DatabaseEvent(..))
 import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.DatabaseService
     ( SearchData,
-      SearchOps(offset, radius, rangeFilter, vectorField, filter, limit),
+      SearchOps(..),
       DatabaseService(..),
-      CollectionLoadState(message, CollectionLoadState, state, progress),
-      QueryOps(offset, filter, limit) )
+      CollectionLoadState(..),
+      QueryOps(..) )
 import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful (IOE, (:>), Eff, MonadIO (liftIO))
@@ -32,7 +32,8 @@ import Effectful.Reader.Static (ask, Reader)
 import Network.HTTP.Client
     ( httpLbs,
       Manager,
-      Response(responseBody), HttpException )
+      Response(..),
+      HttpException )
 
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -296,7 +297,7 @@ setEntitiesImpl ops url (CollectionName col) idsGetter es = do
     case idsGetter resp of
         Nothing -> throwInvalidResponseErrorCode resp.code
         Just ids -> do
-            V.forM_ es $ trigger . OnDatabaseEntityUpdated
+            V.forM_ es $ trigger . OnDatabaseEntityUpdated . SomeEntity
             pure ids
 
 getEntitiesImpl :: forall e es.

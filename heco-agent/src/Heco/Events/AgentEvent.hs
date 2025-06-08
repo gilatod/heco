@@ -13,3 +13,4 @@ data AgentEvent
     | OnAgentInputMessagesGenerated (Vector Message)
     | OnAgentReply TimePhase SessionId Text
     | OnAgentToolInvoked ToolCall ToolResponse
+    deriving (Show)

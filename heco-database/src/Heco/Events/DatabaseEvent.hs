@@ -1,12 +1,13 @@
 module Heco.Events.DatabaseEvent where
 
 import Heco.Data.Collection (CollectionName)
-import Heco.Data.Entity (Entity, EntityId)
+import Heco.Data.Entity (SomeEntity, EntityId)
 
 data DatabaseEvent
     = OnDatabaseCollectionLoaded CollectionName
     | OnDatabaseCollectionReleased CollectionName
     | OnDatabaseCollectionFlushed CollectionName
     | OnDatabaseCollectionCompacted CollectionName
-    | forall e. Entity e => OnDatabaseEntityUpdated e
+    | OnDatabaseEntityUpdated SomeEntity
     | OnDatabaseEntityDeleted EntityId
+    deriving (Show)

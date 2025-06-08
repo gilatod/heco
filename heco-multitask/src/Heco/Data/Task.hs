@@ -4,7 +4,10 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Time (NominalDiffTime, UTCTime, TimeOfDay)
 import Data.Hashable (Hashable)
+import Data.HashSet (HashSet)
+
 import Pattern.Cast (Cast(..))
+import Control.Exception (SomeException)
 
 newtype TaskId = TaskId Int
     deriving (Show, Eq, Ord, Enum, Bounded)
@@ -28,6 +31,22 @@ data TaskStage
     | RunningStage
     | ScheduledStage
     | StoppedStage
+    deriving (Eq, Show)
+
+data TaskInfo = TaskInfo
+    { id :: TaskId
+    , name :: Text
+    , description :: Maybe Text
+    , trigger :: TaskTrigger
+    , parent :: Maybe TaskId }
+
+data TaskStatus = TaskStatus
+    { stage :: TaskStage
+    , createTime :: UTCTime
+    , lastRunTime :: Maybe UTCTime
+    , lastCompleteTime :: Maybe UTCTime
+    , lastException :: Maybe SomeException
+    , children :: HashSet TaskId }
     deriving (Eq, Show)
 
 data Task m = Task

@@ -10,3 +10,4 @@ data AccountEvent
     | OnAccountUsernameChanged Session Username
     | OnAccountNicknameChanged Session Text
     | OnAccountEmailChanged Session Text
+    deriving (Show)

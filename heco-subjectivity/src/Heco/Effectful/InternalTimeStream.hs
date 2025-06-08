@@ -1,6 +1,6 @@
 module Heco.Effectful.InternalTimeStream where
 
-import Heco.Data.TimePhase (TimePhase, AnyImmanantContent (AnyImmanantContent), ImmanantContent)
+import Heco.Data.TimePhase (TimePhase, SomeImmanantContent (SomeImmanantContent), ImmanantContent)
 
 import Effectful (Effect, Eff, (:>))
 import Effectful.TH (makeEffect)
@@ -13,7 +13,7 @@ import Control.Monad (void)
 
 data InternalTimeStream :: Effect where
     ProgressPresent :: InternalTimeStream m TimePhase
-    Present :: Vector AnyImmanantContent -> InternalTimeStream m TimePhase
+    Present :: Vector SomeImmanantContent -> InternalTimeStream m TimePhase
     GetPresent :: InternalTimeStream m TimePhase
     GetRetention :: InternalTimeStream m (Vector TimePhase)
     GetRetentionLength :: InternalTimeStream m Int
@@ -28,23 +28,23 @@ progressPresent_ = void progressPresent
 
 present_ ::
     InternalTimeStream :> es
-    => Vector AnyImmanantContent -> Eff es ()
+    => Vector SomeImmanantContent -> Eff es ()
 present_ contents = void $ present contents
 
 presentList ::
     InternalTimeStream :> es
-    => [AnyImmanantContent] -> Eff es TimePhase
+    => [SomeImmanantContent] -> Eff es TimePhase
 presentList contents = present $ V.fromList contents
 
 presentList_ ::
     InternalTimeStream :> es
-    => [AnyImmanantContent] -> Eff es ()
+    => [SomeImmanantContent] -> Eff es ()
 presentList_ contents = void $ presentList contents
 
 presentOne ::
     (InternalTimeStream :> es, ImmanantContent c)
     => c -> Eff es TimePhase
-presentOne content = present $ V.singleton $ AnyImmanantContent content
+presentOne content = present $ V.singleton $ SomeImmanantContent content
 
 presentOne_ ::
     (InternalTimeStream :> es, ImmanantContent c)

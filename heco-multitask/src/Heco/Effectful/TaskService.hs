@@ -1,10 +1,12 @@
 module Heco.Effectful.TaskService where
 
 import Heco.Data.Task
-    ( TaskId,
-      TaskTrigger(..),
+    ( Task(..),
+      TaskId,
       TaskStage(..),
-      Task(..) )
+      TaskTrigger(..),
+      TaskStatus(..),
+      TaskInfo(..) )
 import Heco.Data.TaskError (TaskError(TaskNotFoundError))
 
 import Effectful
@@ -22,11 +24,9 @@ import Effectful.Concurrent.MVar (MVar, newMVar, modifyMVar, readMVar)
 import Effectful.State.Static.Shared (evalState, get, state, State, modify, gets, stateM)
 import Effectful.Exception (catch, SomeException)
 
-import Data.Text (Text)
 import Data.Text qualified as T
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
-import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
 import Data.Tuple.Extra (dupe)
 import Data.Time
@@ -36,27 +36,14 @@ import Data.Time
       diffLocalTime,
       getZonedTime,
       LocalTime(localDay, LocalTime, localTimeOfDay),
-      ZonedTime(zonedTimeToLocalTime), UTCTime )
+      ZonedTime(zonedTimeToLocalTime) )
 import Data.Int (Int64)
 
 import Control.Concurrent (ThreadId)
 import Control.Monad (forever, when, void, forM_)
 import Control.Monad.Extra (whenJust)
-
-data TaskInfo = TaskInfo
-    { id :: TaskId
-    , name :: Text
-    , description :: Maybe Text
-    , trigger :: TaskTrigger
-    , parent :: Maybe TaskId }
-
-data TaskStatus = TaskStatus
-    { stage :: TaskStage
-    , createTime :: UTCTime
-    , lastRunTime :: Maybe UTCTime
-    , lastCompleteTime :: Maybe UTCTime
-    , children :: HashSet TaskId }
-    deriving (Eq, Show)
+import Heco.Events.TaskEvent (TaskEvent (OnTaskTerminated, OnTaskStarted))
+import Heco.Effectful.Event ( Event, trigger, runEvent )
 
 data TaskService :: Effect where
     StartTask :: Task m -> TaskService m TaskId
@@ -85,7 +72,8 @@ type TaskMap = HashMap TaskId TaskEntry
 removeTask ::
     ( HasCallStack
     , State TaskMap :> es
-    , Concurrent :> es )
+    , Concurrent :> es
+    , Event TaskEvent :> es )
     => TaskId -> Eff es (Maybe TaskEntry)
 removeTask id = do
     entry <- stateM @TaskMap \map -> do
@@ -98,19 +86,23 @@ removeTask id = do
                     pure (s { children = HashSet.delete id s.children }, ())
             _ -> pure ()
         pure (entry, map')
-    whenJust entry killChildren
+    whenJust entry \e -> do
+        killChildren e
+        trigger $ OnTaskTerminated e.info
     pure entry
 
 removeTask_ ::
     ( State TaskMap :> es
-    , Concurrent :> es )
+    , Concurrent :> es
+    , Event TaskEvent :> es )
     => TaskId -> Eff es ()
 removeTask_ id = void $ removeTask id
 
 killChildren ::
     ( HasCallStack
     , State TaskMap :> es
-    , Concurrent :> es )
+    , Concurrent :> es
+    , Event TaskEvent :> es )
     => TaskEntry -> Eff es ()
 killChildren entry = do
     status <- readMVar entry.status
@@ -132,17 +124,22 @@ runTaskThread ::
     ( HasCallStack
     , IOE :> es
     , Concurrent :> es
-    , State TaskMap :> es )
+    , State TaskMap :> es
+    , Event TaskEvent :> es )
     => TaskInfo -> MVar TaskStatus -> Eff es () -> Eff es ThreadId
 runTaskThread info status procedure = do
     forkIO $ scheduleTask info.trigger do
-        modifyStatus \now s -> s
-            { stage = RunningStage
-            , lastRunTime = Just now }
+        modifyStatus \s -> do
+            now <- liftIO getCurrentTime
+            pure s
+                { stage = ScheduledStage
+                , lastRunTime = Just now }
         procedure `catch` handleError 1
-        modifyStatus \now s -> s
-            { stage = ScheduledStage
-            , lastCompleteTime = Just now }
+        modifyStatus \s -> do
+            now <- liftIO getCurrentTime
+            pure s
+                { stage = ScheduledStage
+                , lastCompleteTime = Just now }
     where
         scheduleTask trigger action = case trigger of
             OneShotTrigger ->
@@ -159,7 +156,7 @@ runTaskThread info status procedure = do
                 zonedTime <- liftIO getZonedTime
                 let currLocalTime = zonedTimeToLocalTime zonedTime
                     currTimeOfDay = localTimeOfDay currLocalTime
-                suspend $ diffLocalTime 
+                suspend $ diffLocalTime
                     LocalTime
                         { localDay =
                             if currTimeOfDay > timeOfDay
@@ -169,15 +166,13 @@ runTaskThread info status procedure = do
                     currLocalTime
                 action
             RestartOnException _ trg -> scheduleTask trg action
-        
+
         modifyStatus mapper = do
             shouldRemove <- modifyMVar status \s -> case s.stage of
                 StoppedStage -> do
                     myThreadId >>= killThread
                     pure (s, True)
-                _ -> do
-                    now <- liftIO getCurrentTime
-                    pure (mapper now s, False)
+                _ -> (, False) <$> mapper s
             when shouldRemove $ removeTask_ info.id
 
         handleError retry (e :: SomeException) = do
@@ -187,7 +182,7 @@ runTaskThread info status procedure = do
                 RestartOnException maxRetry _ | maxRetry < retry -> do
                     liftIO $ putStrLn "Restarting..."
                     procedure `catch` handleError (retry + 1)
-                _ -> pure ()
+                _ -> void $ modifyStatus \s -> pure s { lastException = Just e }
 
         suspend diffTime =
             suspendMicroseconds $ toMicroseconds diffTime
@@ -198,7 +193,7 @@ runTaskThread info status procedure = do
                 threadDelay $ fromIntegral delay
                 suspendMicroseconds $ microseconds - delay
 
-        toMicroseconds diffTime = 
+        toMicroseconds diffTime =
             floor $ 1000 * 1000 * nominalDiffTimeToSeconds diffTime
 
 createTask ::
@@ -206,7 +201,8 @@ createTask ::
     , IOE :> es
     , Concurrent :> es
     , State TaskMap :> es
-    , State TaskId :> es )
+    , State TaskId :> es
+    , Event TaskEvent :> es )
     => LocalEnv localEs es
     -> UnliftStrategy
     -> Maybe TaskId
@@ -220,6 +216,7 @@ createTask env unliftStrategy parentId task = do
         , createTime = now
         , lastRunTime = Nothing
         , lastCompleteTime = Nothing
+        , lastException = Nothing
         , children = HashSet.empty }
     let info = TaskInfo
             { id = id
@@ -229,6 +226,7 @@ createTask env unliftStrategy parentId task = do
             , parent = parentId }
     localUnlift env unliftStrategy \unlift -> do
         tid <- runTaskThread info status $ unlift task.procedure
+        trigger $ OnTaskStarted info
         pure TaskEntry
             { threadId = tid
             , info = info
@@ -238,6 +236,7 @@ runStandardTaskService ::
     ( HasCallStack
     , IOE :> es
     , Concurrent :> es
+    , Event TaskEvent :> es
     , Error TaskError :> es )
     => Eff (TaskService : es) a
     -> Eff es a
@@ -271,13 +270,13 @@ runStandardTaskService = reinterpret wrap \env -> \case
         entry <- getTask id
         removeTask_ id
         killThread entry.threadId
-        
+
     ListTasks ->
         get @TaskMap >>= pure . HashMap.foldr' (\s l -> s.info:l) []
 
     LookupTask id -> do
         res <- gets @TaskMap (HashMap.lookup id)
-        pure $ (\e -> e.info) <$> res 
+        pure $ (\e -> e.info) <$> res
 
     GetTaskStatus id -> do
         entry <- getTask id
@@ -293,7 +292,7 @@ runStandardTaskServiceEx ::
     ( HasCallStack
     , IOE :> es
     , Concurrent :> es )
-    => Eff (TaskService : Error TaskError : es) a
+    => Eff (TaskService : Event TaskEvent : Error TaskError : es) a
     -> Eff es (Either (CallStack, TaskError) a)
 runStandardTaskServiceEx =
-    runError . runStandardTaskService
+    runError . runEvent . runStandardTaskService

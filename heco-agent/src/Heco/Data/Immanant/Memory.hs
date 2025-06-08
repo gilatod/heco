@@ -4,7 +4,7 @@ module Heco.Data.Immanant.Memory where
 
 import Heco.Data.Entity (EntityId)
 import Heco.Data.Entity.TH (deriveEntity)
-import Heco.Data.TimePhase (ImmanantContent(..), AnyImmanantContent(..))
+import Heco.Data.TimePhase (ImmanantContent(..), SomeImmanantContent(..))
 
 import Data.Text (Text)
 import Data.Default (Default(..))
@@ -42,6 +42,6 @@ immanantContentToMemory c =
             [] -> Nothing
             contents -> Just $ def { content = mconcat $ intersperse ":" contents }
 
-anyImmanantContentToMemory :: AnyImmanantContent -> Maybe Memory
-anyImmanantContentToMemory (AnyImmanantContent c) =
+someImmanantContentToMemory :: SomeImmanantContent -> Maybe Memory
+someImmanantContentToMemory (SomeImmanantContent c) =
     immanantContentToMemory c

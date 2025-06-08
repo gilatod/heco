@@ -97,16 +97,16 @@ class InvokableLanguageTool es t where
     languageToolPropertySchemas :: [PropertySchema]
     invokeLanguageTool :: HashMap Text Value -> t -> Eff es Value
 
-data AnyLanguageTool es = forall name desc handler.
+data SomeLanguageTool es = forall name desc handler.
     ( InvokableLanguageTool es (LanguageTool es name desc handler)
     , KnownSymbol name, KnownSymbol desc )
-    => AnyLanguageTool (LanguageTool es name desc handler)
+    => SomeLanguageTool (LanguageTool es name desc handler)
 
 instance
     ( InvokableLanguageTool es (LanguageTool es name desc handler)
     , KnownSymbol name, KnownSymbol desc )
-    => Cast (LanguageTool es name desc handler) (AnyLanguageTool es) where
-    cast = AnyLanguageTool
+    => Cast (LanguageTool es name desc handler) (SomeLanguageTool es) where
+    cast = SomeLanguageTool
 
 throwArgNotFound ::
     Error LanguageToolError :> es

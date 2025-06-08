@@ -89,9 +89,9 @@ download = LanguageTool \url -> do
     where
         headers = [("Accept", "text/*;charset=utf-8,application/*;charset=utf-8")]
 
-        createResponse taskRes =
+        createResponse taskRes = do
             let failedResp err = pure [aesonQQ|{ status: "failed", message: #{displayException err} }|]
-            in handle @SomeException failedResp do
+            handle @SomeException failedResp do
                 resp <- either (throwIO . DownloadException) pure taskRes
                 content <- either throwIO pure $ TL.decodeUtf8' $ getResponseBody resp
                 let content' = TL.toStrict content

@@ -6,7 +6,6 @@ module Heco.Agent (runHecoAgent) where
 
 import Heco.Data.FunctionSchema
     ( FieldDesc, HasDataSchema, RecordDefault )
-import Heco.Data.Default ()
 import Heco.Data.Aeson (HasAesonOps, AesonDefault(..))
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.Portal.Shell (shellPortal)

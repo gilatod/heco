@@ -3,13 +3,12 @@
 
 module Heco.Effectful.Agent.Heco where
 
-import Heco.Data.Default ()
 import Heco.Data.Model (ModelName)
 import Heco.Data.Embedding (Embedding)
 import Heco.Data.TimePhase
     ( TimePhase(..),
       ImmanantContent(..),
-      AnyImmanantContent(AnyImmanantContent),
+      SomeImmanantContent(SomeImmanantContent),
       joinImmanantContent, castImmanantContent )
 import Heco.Data.Immanant.Memory (Memory(..))
 import Heco.Data.Immanant.Terminal (Terminal(..))
@@ -99,15 +98,15 @@ data HecoOps = HecoOps
     , memorizingPrompt :: Text
     , chatOps :: ChatOps
     , memoryOps :: HecoMemoryOps
-    , immanantContentFormatter :: AnyImmanantContent -> TLB.Builder
+    , immanantContentFormatter :: SomeImmanantContent -> TLB.Builder
     , messageCacheLimit :: Maybe Int }
 
 data HecoInternal = HecoInternal
     { initialMessage :: Message
     , memorizingPrompt :: Text }
 
-immanantContentXMLFormatter :: AnyImmanantContent -> TLB.Builder
-immanantContentXMLFormatter (AnyImmanantContent c) =
+immanantContentXMLFormatter :: SomeImmanantContent -> TLB.Builder
+immanantContentXMLFormatter (SomeImmanantContent c) =
     case encodeImmanantContent c of
         [] -> mempty
         [c] -> "<" <> TLB.fromText c <> xmlAttrs <> "/>"
@@ -125,12 +124,12 @@ immanantContentXMLFormatter (AnyImmanantContent c) =
 
 embedImmanantContent ::
     (HasCallStack, LanguageService :> es)
-    => HecoOps -> AnyImmanantContent -> Eff es Embedding
-embedImmanantContent ops (AnyImmanantContent mem) = do
+    => HecoOps -> SomeImmanantContent -> Eff es Embedding
+embedImmanantContent ops (SomeImmanantContent mem) = do
     embed ops.memoryOps.embeddingModel $ joinImmanantContent ":" mem
 
 formatImmanantContents ::
-    HecoOps -> Vector AnyImmanantContent -> TLB.Builder
+    HecoOps -> Vector SomeImmanantContent -> TLB.Builder
 formatImmanantContents ops contents = do
     if V.length contents == 0
         then mempty
@@ -169,7 +168,7 @@ associateMemory ::
     , DatabaseService :> es
     , LanguageService :> es
     , InternalTimeStream :> es )
-    => HecoOps -> Eff es (Vector AnyImmanantContent)
+    => HecoOps -> Eff es (Vector SomeImmanantContent)
 associateMemory ops = do
     TimePhase _ contents <- getPresent
     if V.length contents == 0

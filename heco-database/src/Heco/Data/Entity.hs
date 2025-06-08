@@ -5,7 +5,7 @@ import Data.Aeson
       FromJSON,
       Value(Object),
       GToJSON',
-      ToJSON,
+      ToJSON (toJSON),
       genericToJSON,
       defaultOptions )
 import Data.Aeson.TH (deriveJSON)
@@ -46,6 +46,11 @@ class
     => Entity e where
     entityNonDataFields :: [Text]
     entityNonDataFields = ["vector", "sparse_vector"]
+
+data SomeEntity = forall e. Entity e => SomeEntity e
+
+instance Show SomeEntity where
+    show (SomeEntity e) = "Entity " ++ show (toJSON e)
 
 entityDataFields :: forall e. Entity e => [Text]
 entityDataFields =

@@ -48,7 +48,6 @@ library
     Heco.Data.Aeson,
     Heco.Data.Aeson.TH,
     Heco.Data.Record,
-    Heco.Data.Default,
     Heco.Data.Unique,
     Heco.Data.Typelits,
     Heco.Network.HTTP.Client,

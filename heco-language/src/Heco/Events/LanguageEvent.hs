@@ -11,3 +11,4 @@ data LanguageEvent
     | OnStatementChunkReceived Text
     | OnMessageReceived Message
     | OnEmbeddingsReceived (Vector Text) (Vector Embedding)
+    deriving (Show)
