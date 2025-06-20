@@ -1,0 +1,19 @@
+{
+    "name": "heco",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            "CONTAINER_USER": "gilatod",
+            "CONTAINER_GROUP": "gilatod"
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "haskell.haskell",
+                "phoityne.phoityne-vscode"
+            ]
+        }
+    },
+    "remoteUser": "gilatod"
+}
