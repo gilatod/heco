@@ -49,6 +49,7 @@ library
     Heco.Data.Aeson.TH,
     Heco.Data.Record,
     Heco.Data.Unique,
+    Heco.Data.Text,
     Heco.Data.Typelits,
     Heco.Network.HTTP.Client,
     Heco.Effectful.Exception,

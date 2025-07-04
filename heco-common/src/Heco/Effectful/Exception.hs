@@ -17,9 +17,5 @@ instance Show UnhandledHecoException where
 
 instance Exception UnhandledHecoException
 
-runThrowEither :: (HasCallStack, Exception e) => Eff es (Either (CallStack, e) a) -> Eff es a
-runThrowEither m =
-    m >>= either throw pure
-    where
-        throw (callStack, e) =
-            throwIO $ UnhandledHecoException e callStack
+throwUnhandled :: (HasCallStack, Exception e) => CallStack -> e -> Eff es a
+throwUnhandled c e = throwIO $ UnhandledHecoException e c

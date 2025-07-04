@@ -19,6 +19,8 @@ instance Cast TaskId Int where
 
 data TaskTrigger
     = OneShotTrigger
+    | ForeverTrigger
+    | RepetitiveTrigger Int
     | PeriodicTrigger NominalDiffTime
     | DelayedTrigger NominalDiffTime
     | UTCTimeTrigger UTCTime
@@ -47,7 +49,7 @@ data TaskStatus = TaskStatus
     , lastCompleteTime :: Maybe UTCTime
     , lastException :: Maybe SomeException
     , children :: HashSet TaskId }
-    deriving (Eq, Show)
+    deriving (Show)
 
 data Task m = Task
     { name :: Text
@@ -70,6 +72,20 @@ oneShotTask name proc = Task
     , description = Nothing
     , procedure = proc
     , trigger = OneShotTrigger }
+
+foreverTask :: Text -> m () -> Task m
+foreverTask name proc = Task
+    { name = name
+    , description = Nothing
+    , procedure = proc
+    , trigger = ForeverTrigger }
+
+repetitiveTask :: Text -> Int -> m () -> Task m
+repetitiveTask name count proc = Task
+    { name = name
+    , description = Nothing
+    , procedure = proc
+    , trigger = RepetitiveTrigger count }
 
 periodicTask :: Text -> NominalDiffTime -> m () -> Task m
 periodicTask name duration proc = Task

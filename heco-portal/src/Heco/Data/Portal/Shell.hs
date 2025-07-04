@@ -3,9 +3,10 @@ module Heco.Data.Portal.Shell where
 import Heco.Conduit.Concurrent (mergeSources)
 import Heco.Data.Portal (Portal(..), PortalSignal(..))
 import Heco.Data.TimePhase (format)
-import Heco.Data.Immanant.Terminal (Terminal(..))
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, presentOne_, getRetention)
+import Heco.Data.Immanent.Terminal (Terminal(..))
+import Heco.Effectful.ImmanentTime (ImmanentTime, presentOne_, getRetention)
 import Heco.Effectful.Agent (withAgentInteraction, Agent)
+import Heco.Effectful.PortalService (PortalService, killPortal_)
 
 import Effectful (Eff, (:>), IOE)
 import Effectful.Concurrent (Concurrent)
@@ -20,7 +21,6 @@ import Data.Text.Lazy.IO qualified as TL
 import Data.Vector qualified as V
 
 import Control.Monad (unless)
-import Heco.Effectful.PortalService (PortalService, killPortal_)
 
 stdinLines :: MonadIO m => ConduitT i Text m ()
 stdinLines = do
@@ -32,7 +32,7 @@ stdinLines = do
 shellPortal :: forall es.
     ( IOE :> es
     , Concurrent :> es
-    , InternalTimeStream :> es
+    , ImmanentTime :> es
     , PortalService :> es
     , Agent :> es )
     => Portal (Eff es)

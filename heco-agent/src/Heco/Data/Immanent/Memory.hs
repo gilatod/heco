@@ -1,10 +1,10 @@
 {-# LANGUAGE DeriveAnyClass #-}
 
-module Heco.Data.Immanant.Memory where
+module Heco.Data.Immanent.Memory where
 
 import Heco.Data.Entity (EntityId)
 import Heco.Data.Entity.TH (deriveEntity)
-import Heco.Data.TimePhase (ImmanantContent(..), SomeImmanantContent(..))
+import Heco.Data.Immanent (Immanent(..), SomeImmanent(..))
 
 import Data.Text (Text)
 import Data.Default (Default(..))
@@ -29,19 +29,19 @@ instance Default Memory where
         , content = ""
         , metadata = Nothing }
 
-instance ImmanantContent Memory where
-    encodeImmanantContent m = "memory":[m.content]
+instance Immanent Memory where
+    encode m = "memory":[m.content]
 
 deriveEntity ''Memory
 
-immanantContentToMemory :: ImmanantContent c => c -> Maybe Memory
-immanantContentToMemory c =
+immanentToMemory :: Immanent c => c -> Maybe Memory
+immanentToMemory c =
     case cast c of
         Just mem -> Just mem
-        _ -> case encodeImmanantContent c of
+        _ -> case encode c of
             [] -> Nothing
             contents -> Just $ def { content = mconcat $ intersperse ":" contents }
 
-someImmanantContentToMemory :: SomeImmanantContent -> Maybe Memory
-someImmanantContentToMemory (SomeImmanantContent c) =
-    immanantContentToMemory c
+someImmanentToMemory :: SomeImmanent -> Maybe Memory
+someImmanentToMemory (SomeImmanent c) =
+    immanentToMemory c

@@ -8,6 +8,9 @@ import Heco.Data.Task
       TaskStatus(..),
       TaskInfo(..) )
 import Heco.Data.TaskError (TaskError(TaskNotFoundError))
+import Heco.Events.TaskEvent (TaskEvent (OnTaskTerminated, OnTaskStarted))
+import Heco.Effectful.Event ( Event, trigger, runEvent )
+import Heco.Effectful.Exception (throwUnhandled)
 
 import Effectful
     ( type (:>),
@@ -18,7 +21,7 @@ import Effectful
       UnliftStrategy(ConcUnlift), IOE, MonadIO (liftIO) )
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, localUnlift, LocalEnv)
 import Effectful.TH (makeEffect)
-import Effectful.Error.Dynamic (Error, runError, CallStack, throwError)
+import Effectful.Error.Dynamic (Error, throwError, runErrorWith)
 import Effectful.Concurrent (Concurrent, forkIO, threadDelay, killThread, myThreadId)
 import Effectful.Concurrent.MVar (MVar, newMVar, modifyMVar, readMVar)
 import Effectful.State.Static.Shared (evalState, get, state, State, modify, gets, stateM)
@@ -40,10 +43,8 @@ import Data.Time
 import Data.Int (Int64)
 
 import Control.Concurrent (ThreadId)
-import Control.Monad (forever, when, void, forM_)
+import Control.Monad (forever, when, void, forM_, replicateM_)
 import Control.Monad.Extra (whenJust)
-import Heco.Events.TaskEvent (TaskEvent (OnTaskTerminated, OnTaskStarted))
-import Heco.Effectful.Event ( Event, trigger, runEvent )
 
 data TaskService :: Effect where
     StartTask :: Task m -> TaskService m TaskId
@@ -127,7 +128,7 @@ runTaskThread ::
     , State TaskMap :> es
     , Event TaskEvent :> es )
     => TaskInfo -> MVar TaskStatus -> Eff es () -> Eff es ThreadId
-runTaskThread info status procedure = do
+runTaskThread info status procedure =
     forkIO $ scheduleTask info.trigger do
         modifyStatus \s -> do
             now <- liftIO getCurrentTime
@@ -144,6 +145,10 @@ runTaskThread info status procedure = do
         scheduleTask trigger action = case trigger of
             OneShotTrigger ->
                 action >> removeTask_ info.id
+            ForeverTrigger ->
+                forever action
+            RepetitiveTrigger count ->
+                replicateM_ count action
             PeriodicTrigger delay ->
                 forever $ suspend delay >> action
             DelayedTrigger delay ->
@@ -156,12 +161,12 @@ runTaskThread info status procedure = do
                 zonedTime <- liftIO getZonedTime
                 let currLocalTime = zonedTimeToLocalTime zonedTime
                     currTimeOfDay = localTimeOfDay currLocalTime
+                    currDay = if currTimeOfDay > timeOfDay
+                        then succ $ localDay currLocalTime
+                        else localDay currLocalTime
                 suspend $ diffLocalTime
                     LocalTime
-                        { localDay =
-                            if currTimeOfDay > timeOfDay
-                                then succ $ localDay currLocalTime
-                                else localDay currLocalTime
+                        { localDay = currDay
                         , localTimeOfDay = timeOfDay }
                     currLocalTime
                 action
@@ -194,7 +199,7 @@ runTaskThread info status procedure = do
                 suspendMicroseconds $ microseconds - delay
 
         toMicroseconds diffTime =
-            floor $ 1000 * 1000 * nominalDiffTimeToSeconds diffTime
+            floor $ 1000000 * nominalDiffTimeToSeconds diffTime
 
 createTask ::
     ( HasCallStack
@@ -272,7 +277,7 @@ runStandardTaskService = reinterpret wrap \env -> \case
         killThread entry.threadId
 
     ListTasks ->
-        get @TaskMap >>= pure . HashMap.foldr' (\s l -> s.info:l) []
+        get @TaskMap >>= pure . HashMap.foldl' (\l s -> s.info:l) []
 
     LookupTask id -> do
         res <- gets @TaskMap (HashMap.lookup id)
@@ -293,6 +298,6 @@ runStandardTaskServiceEx ::
     , IOE :> es
     , Concurrent :> es )
     => Eff (TaskService : Event TaskEvent : Error TaskError : es) a
-    -> Eff es (Either (CallStack, TaskError) a)
+    -> Eff es a
 runStandardTaskServiceEx =
-    runError . runEvent . runStandardTaskService
+    runErrorWith throwUnhandled . runEvent . runStandardTaskService

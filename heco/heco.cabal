@@ -47,8 +47,8 @@ library
   exposed-modules:
     Heco.Effectful.Agent.Heco,
     Heco.Agent.AuthGroups,
-    Heco.Agent.LanguageTools.Archives,
-    Heco.Agent.LanguageTools.Downloader,
+    Heco.Agent.Tools.Archives,
+    Heco.Agent.Tools.Downloader,
     Heco.Agent
   build-depends:
     base,

@@ -16,6 +16,7 @@ import Heco.Data.LanguageError (LanguageError(LanguageBackendError, LanguageInpu
 import Heco.Data.Embedding (Embedding)
 import Heco.Data.FunctionSchema (FunctionSchema(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
+import Heco.Effectful.Exception (throwUnhandled)
 import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.Event (Event, trigger, runEvent)
 import Heco.Effectful.LanguageService (LanguageService(..), ChatOps(..))
@@ -23,7 +24,7 @@ import Heco.Effectful.LanguageService.Common (unliftEventIO, relayError)
 
 import Effectful (Eff, (:>), IOE, MonadIO (liftIO))
 import Effectful.Dispatch.Dynamic (reinterpret)
-import Effectful.Error.Dynamic (Error, HasCallStack, throwError, runError, CallStack)
+import Effectful.Error.Dynamic (Error, HasCallStack, throwError, runErrorWith)
 import Effectful.Reader.Static (ask, Reader)
 
 import Network.HTTP.Client
@@ -201,6 +202,6 @@ runOllamaLanguageServiceEx ::
     (HasCallStack, IOE :> es)
     => OllamaOps
     -> Eff (LanguageService : Event LanguageEvent : Error LanguageError : es) a
-    -> Eff es (Either (CallStack, LanguageError) a)
+    -> Eff es a
 runOllamaLanguageServiceEx ops =
-    runError . runEvent . runOllamaLanguageService ops
+    runErrorWith throwUnhandled . runEvent . runOllamaLanguageService ops

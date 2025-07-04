@@ -16,6 +16,7 @@ import Heco.Data.Message (Message(..), ToolCall(..), ToolResponse(..), newAssist
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.Role (Role(..))
 import Heco.Events.LanguageEvent (LanguageEvent(..))
+import Heco.Effectful.Exception (throwUnhandled)
 import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.Event (Event, trigger, runEvent)
 import Heco.Effectful.LanguageService (LanguageService(..), ChatOps(..))
@@ -23,7 +24,7 @@ import Heco.Effectful.LanguageService.Common (unliftEventIO, relayError)
 
 import Effectful (Eff, (:>), IOE, MonadIO (liftIO), runEff)
 import Effectful.Dispatch.Dynamic (reinterpret)
-import Effectful.Error.Dynamic (Error, HasCallStack, throwError, runError, CallStack)
+import Effectful.Error.Dynamic (Error, HasCallStack, throwError, runErrorWith)
 import Effectful.Reader.Static (ask)
 import Effectful.State.Static.Local (evalState, State, state, modify)
 
@@ -489,6 +490,6 @@ runOpenAILanguageServiceEx ::
     (HasCallStack, IOE :> es)
     => OpenAIOps
     -> Eff (LanguageService : Event LanguageEvent : Error LanguageError : es) a
-    -> Eff es (Either (CallStack, LanguageError) a)
+    -> Eff es a
 runOpenAILanguageServiceEx ops =
-    runError . runEvent . runOpenAILanguageService ops
+    runErrorWith throwUnhandled . runEvent . runOpenAILanguageService ops

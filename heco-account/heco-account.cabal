@@ -66,4 +66,5 @@ library
     hashable,
     cast,
     ldap-client,
+    heco-common,
     heco-event

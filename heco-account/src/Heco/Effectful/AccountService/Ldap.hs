@@ -20,11 +20,12 @@ import Heco.Data.User (User(..), Username(Username))
 import Heco.Data.AuthGroup (GroupName(GroupName))
 import Heco.Data.Session (SessionToken, Session(..), newSessionToken)
 import Heco.Events.AccountEvent (AccountEvent(..))
+import Heco.Effectful.Exception (throwUnhandled)
 import Heco.Effectful.AccountService (AccountService(..), LoginOps(..))
 import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful ((:>), Eff, IOE, MonadIO(liftIO))
-import Effectful.Error.Dynamic (Error, throwError, runError, CallStack)
+import Effectful.Error.Dynamic (Error, throwError, runErrorWith)
 import Effectful.Dispatch.Dynamic (reinterpret, HasCallStack)
 import Effectful.State.Static.Shared (State, evalState, modify, get)
 import Effectful.Exception (SomeException)
@@ -384,6 +385,6 @@ runLdapAccountServiceEx ::
     (HasCallStack, IOE :> es)
     => LdapOps
     -> Eff (AccountService : Event AccountEvent : Error AccountError : es) a
-    -> Eff es (Either (CallStack, AccountError) a)
+    -> Eff es a
 runLdapAccountServiceEx ops =
-    runError . runEvent . runLdapAccountService ops
+    runErrorWith throwUnhandled . runEvent . runLdapAccountService ops

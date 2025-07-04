@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
-
 {-# LANGUAGE DeriveAnyClass #-}
 
 module Heco.Agent (runHecoAgent) where
@@ -10,11 +9,11 @@ import Heco.Data.Aeson (HasAesonOps, AesonDefault(..))
 import Heco.Data.LanguageError (LanguageError(..))
 import Heco.Data.Portal.Shell (shellPortal)
 import Heco.Data.Portal.OneBot (makeOneBotPortal, OneBotOps(..))
-import Heco.Data.LanguageToolRegistry qualified as Registry
+import Heco.Data.AgentToolRegistry qualified as Registry
 import Heco.Effectful.DatabaseService
     ( SearchOps(..) )
 import Heco.Events.LanguageEvent (LanguageEvent(..))
-import Heco.Effectful.Exception (runThrowEither)
+import Heco.Effectful.Exception (throwUnhandled)
 import Heco.Effectful.Event (Event, runEvent, listen_)
 import Heco.Effectful.LanguageService
     ( LanguageService(..), ChatOps(..), chatOps )
@@ -30,26 +29,27 @@ import Heco.Effectful.AccountService.Ldap
 import Heco.Effectful.PrivilegeService (runSimplePrivilegeService)
 import Heco.Effectful.LanguageService.OpenAI (OpenAIOps(..), runOpenAILanguageService, openaiOps)
 import Heco.Effectful.LanguageService.Ollama (OllamaOps(..))
-import Heco.Effectful.LanguageToolProvider.Native (runNativeLanguageToolProviderEx, modifyLangaugeToolRegistry)
+import Heco.Effectful.AgentToolProvider.Native (runNativeAgentToolProviderEx, modifyLangaugeToolRegistry)
 import Heco.Effectful.DatabaseService.Milvus (runMilvusDatabaseServiceEx, MilvusOps(..))
-import Heco.Effectful.InternalTimeStream.RingBuffer (RingBufferOps(..), runRingBufferInternalTimeStreamEx)
+import Heco.Effectful.ImmanentTime.RingBuffer (RingBufferOps(..), runRingBufferImmanentTimeEx)
 import Heco.Effectful.TaskService (runStandardTaskServiceEx)
 import Heco.Effectful.Agent.Heco
     ( hecoMemoryOps,
-      immanantContentXMLFormatter,
+      immanentXMLFormatter,
       runHecoAgentEx,
       HecoMemoryOps(searchOps),
       HecoOps(..) )
 import Heco.Effectful.PortalService (runStandardPortalService, runPortal_)
-import Heco.Agent.LanguageTools.Archives (archivesToolModule, ArchiveToolOps(..))
-import Heco.Agent.LanguageTools.Downloader (downloaderToolModule)
+
+import Heco.Agent.Tools.Archives (archivesToolModule, ArchiveToolOps(..))
+import Heco.Agent.Tools.Downloader (downloaderToolModule)
 import Heco.Agent.AuthGroups (authGroups)
 
 import Effectful (runEff, Eff, IOE, (:>), MonadIO (liftIO))
 import Effectful.Fail (runFailIO)
 import Effectful.Concurrent (runConcurrent, threadDelay)
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret, send)
-import Effectful.Error.Dynamic (CallStack, Error, runError)
+import Effectful.Error.Dynamic (CallStack, Error, runError, runErrorWith)
 import Effectful.Labeled (runLabeled, Labeled(Labeled))
 import Effectful.Resource (runResource)
 import Effectful.Timeout (runTimeout)
@@ -68,9 +68,9 @@ runCombinedLanguageService ::
     (HasCallStack, IOE :> es)
     => OpenAIOps -> OllamaOps
     -> Eff (LanguageService : Event LanguageEvent : Error LanguageError : es) a
-    -> Eff es (Either (CallStack, LanguageError) a)
+    -> Eff es a
 runCombinedLanguageService openaiOps ollamaOps =
-    runError . runEvent . reinterpret evalInternal \_ -> \case
+    runErrorWith throwUnhandled . runEvent . reinterpret evalInternal \_ -> \case
         Chat chatOps messages -> send $ Labeled @"openai" $ Chat chatOps messages
         Embed modelName text -> send $ Labeled @"openai" $ Embed modelName text
         EmbedMany modelName texts -> send $ Labeled @"openai" $ EmbedMany modelName texts
@@ -89,11 +89,11 @@ data Location = Location
     -- 用 HasAesonOps 里指定的配置来实现 JSON Schema 自动创建
     deriving HasDataSchema via (RecordDefault Location)
 
--- adderTool :: LanguageTool es
+-- adderTool :: AgentTool es
 --     "adder"
 --     "Add two numbers together"
 --     (ParamDesc "a" Float "First number" -> ParamDesc "b" Float "Second number" -> Ret Float)
--- adderTool = LanguageTool \a b -> pure $ a + b
+-- adderTool = AgentTool \a b -> pure $ a + b
 
 ollamaOps :: OllamaOps
 ollamaOps = OllamaOps
@@ -118,7 +118,7 @@ makeHecoOps = do
         , chatOps = (chatOps "qwen3-235b-a22b")
             { extra = KeyMap.fromList
                 [("enable_thinking", Bool False)] }
-        , immanantContentFormatter = immanantContentXMLFormatter
+        , immanentFormatter = immanentXMLFormatter
         , memoryOps = (hecoMemoryOps "memory" "text-embedding-v3")
             { searchOps = def
                 { limit = Just 5
@@ -132,10 +132,10 @@ runHecoAgent = do
     openaiOps <- makeOpenAIOps
 
     let runHeco = runEff . runFailIO . runConcurrent . runResource. runTimeout
-            . runThrowEither . runStandardTaskServiceEx
+            . runStandardTaskServiceEx
             . runSimplePrivilegeService authGroups
-            . runThrowEither . runCombinedLanguageService openaiOps ollamaOps
-            . runThrowEither . runLdapAccountServiceEx LdapOps
+            . runCombinedLanguageService openaiOps ollamaOps
+            . runLdapAccountServiceEx LdapOps
                 { host = Tls "auth.gilatod.art" def
                 , port = 636
                 , domain = Dn "cn=readonly,dc=gilatod,dc=art"
@@ -154,25 +154,23 @@ runHecoAgent = do
                     { name = "cn"
                     , member = "uniqueMember" }
                 , groupMemberIdentification = GroupMemberIdentifiedByDn }
-            . runThrowEither . runMilvusDatabaseServiceEx MilvusOps
+            . runMilvusDatabaseServiceEx MilvusOps
                 { url = "http://gilatod.local:19530/v2"
                 , timeout = Nothing
                 , token = Nothing
                 , database = Just "heco" }
-            . runThrowEither . runRingBufferInternalTimeStreamEx RingBufferOps
+            . runRingBufferImmanentTimeEx RingBufferOps
                 { capacity = 20 }
-            . runThrowEither . runNativeLanguageToolProviderEx
-            . runThrowEither . runHecoAgentEx hecoOps
+            . runNativeAgentToolProviderEx
+            . runHecoAgentEx hecoOps
             . runStandardPortalService
 
     void $ runHeco do
         liftIO $ putStrLn "Heco is running."
 
         listen_ \case
-            OnAgentToolInvoked call resp -> do
+            OnAgentToolInvoked call _ -> do
                 liftIO $ print call
-                liftIO $ putStr ">>> "
-                liftIO $ print resp
             _ -> pure ()
 
         modifyLangaugeToolRegistry
@@ -181,7 +179,7 @@ runHecoAgent = do
                     { embeddingModel = "text-embedding-v3"
                     , collectionName = "archives" })
             . Registry.addModule
-                downloaderToolModule
+                (downloaderToolModule def)
 
         runPortal_ shellPortal
         runPortal_ $ makeOneBotPortal def

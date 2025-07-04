@@ -1,16 +1,16 @@
-module Heco.Agent.LanguageTools.Archives where
+module Heco.Agent.Tools.Archives where
 
 import Heco.Data.MonoHFunctor (MonoHFunctor(ohmap))
-import Heco.Data.LanguageTool
+import Heco.Data.AgentTool
     ( addTool,
       emptyModuleBuilder,
       toModule,
-      LanguageTool(..),
-      LanguageToolModule,
+      AgentTool(..),
+      AgentToolModule,
       MaybeParamDesc,
       ParamDesc,
       Ret )
-import Heco.Data.LanguageToolError (LanguageToolError)
+import Heco.Data.AgentToolError (AgentToolError)
 import Heco.Data.Entity (EntityId (EntityId))
 import Heco.Data.Entity.TH (deriveEntity)
 import Heco.Data.Model (ModelName)
@@ -28,7 +28,7 @@ import Heco.Effectful.LanguageService (LanguageService, embed)
 
 import Effectful ((:>), MonadIO (liftIO), IOE, Eff)
 import Effectful.Error.Dynamic (Error)
-import Effectful.Reader.Dynamic (Reader, ask, runReader)
+import Effectful.Reader.Static (Reader, ask, runReader)
 
 import Data.Text (Text)
 import Data.Text qualified  as T
@@ -39,7 +39,6 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.QQ (aesonQQ)
 import Data.Default (Default (def))
 import Data.Time (getCurrentTime)
-import Data.Maybe (fromMaybe)
 import Data.Function ((&))
 
 import PyF (fmt)
@@ -67,11 +66,11 @@ type HasArchiveToolEs es =
 addArchive ::
     ( Reader ArchiveToolOps :> es
     , HasArchiveToolEs es )
-    => LanguageTool es
+    => AgentTool es
         "add"
         "向「荏苒之境图书馆」添加档案"
         (ParamDesc "content" Text "档案内容" -> Ret Value)
-addArchive = LanguageTool \content -> do
+addArchive = AgentTool \content -> do
     ops <- ask @ArchiveToolOps
     embedding <- embed ops.embeddingModel content
     time <- liftIO getCurrentTime
@@ -88,11 +87,11 @@ addArchive = LanguageTool \content -> do
 getArchive ::
     ( Reader ArchiveToolOps :> es
     , HasArchiveToolEs es )
-    => LanguageTool es
+    => AgentTool es
         "get"
         "在「荏苒之境图书馆」中使用档案ID来获取档案内容"
         (ParamDesc "id" Int "档案ID" -> Ret Value)
-getArchive = LanguageTool \id -> do
+getArchive = AgentTool \id -> do
     ops <- ask @ArchiveToolOps
     entity <- getEntity @ArchiveEntity ops.collectionName $ EntityId id
     case entity of
@@ -103,11 +102,11 @@ getArchive = LanguageTool \id -> do
 modifyArchive ::
     ( Reader ArchiveToolOps :> es
     , HasArchiveToolEs es )
-    => LanguageTool es
+    => AgentTool es
         "modify"
         "修改「荏苒之境图书馆」中的档案"
         (ParamDesc "id" Int "档案ID" -> ParamDesc "content" Text "档案的新内容" -> Ret Value)
-modifyArchive = LanguageTool \id content -> do
+modifyArchive = AgentTool \id content -> do
     ops <- ask @ArchiveToolOps
     entity <- getEntity @ArchiveEntity ops.collectionName $ EntityId id
     case entity of
@@ -134,11 +133,11 @@ modifyArchive = LanguageTool \id content -> do
 removeArchive ::
     ( Reader ArchiveToolOps :> es
     , HasArchiveToolEs es )
-    => LanguageTool es
+    => AgentTool es
         "remove"
         "从「荏苒之境图书馆」中删除档案"
         (ParamDesc "id" Int "档案ID" -> Ret Value)
-removeArchive = LanguageTool \id -> do
+removeArchive = AgentTool \id -> do
     ops <- ask @ArchiveToolOps
     deleteEntities ops.collectionName [fmt|id=={id}|]
     pure [aesonQQ|{ status: "success" }|]
@@ -146,14 +145,14 @@ removeArchive = LanguageTool \id -> do
 searchArchive ::
     ( Reader ArchiveToolOps :> es
     , HasArchiveToolEs es )
-    => LanguageTool es
+    => AgentTool es
         "search"
         "在「荏苒之境图书馆」中搜索档案"
         ( ParamDesc "keywords" Text "关键词"
         -> MaybeParamDesc "exclude_ids" [Int] "在搜索结果中排除的档案ID（例如用于排除之前已经搜索到的档案）"
         -> MaybeParamDesc "limit" Int "搜索数量限制"
         -> Ret Value)
-searchArchive = LanguageTool \keywords excludeIds limit -> do
+searchArchive = AgentTool \keywords excludeIds limit -> do
     ops <- ask @ArchiveToolOps
     let searchOps = def
             { vectorField = "sparse_vector"
@@ -166,14 +165,14 @@ searchArchive = LanguageTool \keywords excludeIds limit -> do
 fuzzySearchArchive ::
     ( Reader ArchiveToolOps :> es
     , HasArchiveToolEs es )
-    => LanguageTool es
+    => AgentTool es
         "fuzzy_search"
         "在「荏苒之境图书馆」中模糊搜索档案"
         ( ParamDesc "fragments" (V.Vector Text) "用于进行模糊搜索的相似档案片段"
         -> MaybeParamDesc "exclude_ids" [Int] "在搜索结果中排除的档案ID（例如用于排除之前已经搜索到的档案）"
         -> MaybeParamDesc "limit" Int "搜索数量限制"
         -> Ret Value)
-fuzzySearchArchive = LanguageTool \fragments excludeIds limit -> do
+fuzzySearchArchive = AgentTool \fragments excludeIds limit -> do
     ops <- ask @ArchiveToolOps
     let searchOps = def
             { limit = limit <|> Just 10
@@ -184,8 +183,8 @@ fuzzySearchArchive = LanguageTool \fragments excludeIds limit -> do
 
 archivesToolModule ::
     ( HasArchiveToolEs es
-    , Error LanguageToolError :> es )
-    => ArchiveToolOps -> LanguageToolModule "archives" (Eff es)
+    , Error AgentToolError :> es )
+    => ArchiveToolOps -> AgentToolModule "archives" (Eff es)
 archivesToolModule ops = emptyModuleBuilder
     & addTool addArchive
     & addTool removeArchive

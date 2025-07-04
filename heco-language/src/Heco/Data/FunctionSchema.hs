@@ -48,7 +48,6 @@ import Data.Proxy (Proxy(..))
 import Data.Maybe (fromMaybe)
 import Data.Typeable (typeRepTyCon, tyConName, TypeRep, typeRep, Typeable)
 import Data.Scientific (toRealFloat, toBoundedInteger)
-import Data.Functor ((<&>))
 import Control.Arrow ((>>>))
 import Control.Monad.Extra (firstJustM)
 
@@ -366,7 +365,7 @@ parseDataSchema v = do
                 Nothing -> parseSimpleDataSchema v
                 Just items -> do
                     itemType <- v .:? "type"
-                    descs <- (v .:? "enumDescriptions") <&> fromMaybe (repeat Nothing)
+                    descs <- fromMaybe (repeat Nothing) <$> (v .:? "enumDescriptions")
                     case itemType :: Maybe Text of
                         Nothing -> pure $ AnyEnumSchema $ zipWith EnumOption items descs
                         Just t -> parseTypedEnum items descs t
@@ -435,7 +434,7 @@ parseSimpleDataSchema v = do
             maximumLength <- v .:? "maximumLength"
             itemSpec <- case items of
                 Left s -> do
-                    uniqueItems <- (v .:? "uniqueItems") <&> fromMaybe False
+                    uniqueItems <- fromMaybe False <$> (v .:? "uniqueItems")
                     if uniqueItems
                         then pure $ UniqueItems s
                         else pure $ ArrayItems s

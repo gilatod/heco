@@ -1,6 +1,6 @@
 module Heco.Data.Portal where
 
-import Heco.Data.Immanant.Terminal (SessionId)
+import Heco.Data.Immanent.Terminal (SessionId)
 import Heco.Data.TimePhase (TimePhase)
 
 import Data.Conduit (ConduitT)

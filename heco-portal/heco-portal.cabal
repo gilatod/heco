@@ -44,7 +44,7 @@ library
   default-language: GHC2024
   hs-source-dirs: src
   exposed-modules:
-    Heco.Data.Portal,
+    Heco.Data.Immanent.Portal,
     Heco.Data.Portal.Shell,
     Heco.Data.Portal.OneBot,
     Heco.Effectful.PortalService
@@ -68,4 +68,5 @@ library
     heco-common,
     heco-event,
     heco-subjectivity,
+    heco-multitask,
     heco-agent

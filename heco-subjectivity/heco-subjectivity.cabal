@@ -46,13 +46,12 @@ library
   exposed-modules:
     Heco.Data.Noema,
     Heco.Data.TimePhase,
-    Heco.Data.Immanant.SenseData,
-    Heco.Data.Immanant.Action,
-    Heco.Data.Immanant.Referent,
-    Heco.Data.InternalTimeStreamError,
-    Heco.Effectful.InternalTimeStream,
-    Heco.Effectful.InternalTimeStream.RingBuffer,
-    Heco.Events.InternalTimeStreamEvent
+    Heco.Data.Immanent,
+    Heco.Data.ImmanentTimeError,
+    Heco.Effectful.Intentionality,
+    Heco.Effectful.ImmanentTime,
+    Heco.Effectful.ImmanentTime.RingBuffer,
+    Heco.Events.ImmanentTimeEvent
   build-depends:
     base,
     extra,
@@ -65,4 +64,5 @@ library
     cast,
     aeson,
     ring-buffer,
+    heco-common,
     heco-event

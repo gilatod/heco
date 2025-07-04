@@ -5,27 +5,28 @@ module Heco.Effectful.Agent.Heco where
 
 import Heco.Data.Model (ModelName)
 import Heco.Data.Embedding (Embedding)
+import Heco.Data.Immanent (SomeImmanent(..), join, encode, getAttributes)
+import Heco.Data.Immanent.Memory (Memory(..))
+import Heco.Data.Immanent.Terminal (Terminal(..))
 import Heco.Data.TimePhase
-    ( TimePhase(..),
-      ImmanantContent(..),
-      SomeImmanantContent(SomeImmanantContent),
-      joinImmanantContent, castImmanantContent )
-import Heco.Data.Immanant.Memory (Memory(..))
-import Heco.Data.Immanant.Terminal (Terminal(..))
+    ( TimePhase(..), castImmanent )
 import Heco.Data.Collection (CollectionName)
 import Heco.Data.Message
-    ( messageText,
+    ( Message(UserMessage, ToolMessage, AssistantMessage),
+      ToolResponse(content, ToolResponse, id, name),
+      ToolCall(id, name, arguments),
+      messageText,
       newSystemMessage,
       newToolMessage,
       newUserMessage,
-      Message(ToolMessage, UserMessage, AssistantMessage),
-      ToolCall(id, name, arguments),
-      ToolResponse(content, ToolResponse, id, name), formatToolCall, formatToolResponse )
+      formatToolCall,
+      formatToolResponse )
 import Heco.Data.LanguageError (LanguageError)
 import Heco.Data.AgentError (AgentError(..))
 import Heco.Data.TimePhase qualified as TimePhase
 import Heco.Events.AgentEvent (AgentEvent(..))
-import Heco.Events.InternalTimeStreamEvent (InternalTimeStreamEvent(..))
+import Heco.Events.ImmanentTimeEvent (ImmanentTimeEvent(..))
+import Heco.Effectful.Exception (throwUnhandled)
 import Heco.Effectful.Event (Event, trigger, runEvent, collect)
 import Heco.Effectful.DatabaseService
     ( SearchOps(..),
@@ -33,12 +34,12 @@ import Heco.Effectful.DatabaseService
       searchEntities, SearchData(DenseVectorData), addEntity_ )
 import Heco.Effectful.LanguageService
     ( chat, embed, ChatOps(tools), LanguageService )
-import Heco.Effectful.LanguageToolProvider
-    ( LanguageToolProvider,
-      getLanguageToolSchemas,
-      invokeLanguageTool )
-import Heco.Effectful.InternalTimeStream
-    ( InternalTimeStream,
+import Heco.Effectful.AgentToolProvider
+    ( AgentToolProvider,
+      getAgentToolSchemas,
+      invokeAgentTool )
+import Heco.Effectful.ImmanentTime
+    ( ImmanentTime,
       present_,
       getRetention,
       getPresent,
@@ -49,7 +50,7 @@ import Effectful (Eff, (:>), MonadIO (liftIO), IOE)
 import Effectful.Dispatch.Dynamic (localSeqUnlift, HasCallStack, reinterpret)
 import Effectful.State.Static.Shared (State, modify, state, evalState)
 import Effectful.Reader.Static (runReader, Reader, ask)
-import Effectful.Error.Dynamic (Error, throwError, runError, CallStack, catchError)
+import Effectful.Error.Dynamic (Error, throwError, runError, CallStack, catchError, runErrorWith)
 import Effectful.Exception (finally, Exception(displayException))
 import Effectful.Concurrent (Concurrent)
 import Effectful.Concurrent.QSem (QSem, waitQSem, signalQSem, newQSem)
@@ -98,16 +99,16 @@ data HecoOps = HecoOps
     , memorizingPrompt :: Text
     , chatOps :: ChatOps
     , memoryOps :: HecoMemoryOps
-    , immanantContentFormatter :: SomeImmanantContent -> TLB.Builder
+    , immanentFormatter :: SomeImmanent -> TLB.Builder
     , messageCacheLimit :: Maybe Int }
 
 data HecoInternal = HecoInternal
     { initialMessage :: Message
     , memorizingPrompt :: Text }
 
-immanantContentXMLFormatter :: SomeImmanantContent -> TLB.Builder
-immanantContentXMLFormatter (SomeImmanantContent c) =
-    case encodeImmanantContent c of
+immanentXMLFormatter :: SomeImmanent -> TLB.Builder
+immanentXMLFormatter (SomeImmanent c) =
+    case encode c of
         [] -> mempty
         [c] -> "<" <> TLB.fromText c <> xmlAttrs <> "/>"
         c:cs ->
@@ -116,29 +117,29 @@ immanantContentXMLFormatter (SomeImmanantContent c) =
                 mconcat (intersperse ":" $ map TLB.fromText cs) <>
                 "\n</" <> cb <> ">"
     where
-        xmlAttrs = case getImmanantContentAttributes c of
+        xmlAttrs = case getAttributes c of
             [] -> mempty
             attrs -> attrs & mconcat . (" ":) . intersperse " " . map \(key, value) ->
                 TLB.fromText key <> "=\"" <>
                 TLB.fromText (T.replace "\"" "\\\"" value) <> "\""
 
-embedImmanantContent ::
+embedImmanent ::
     (HasCallStack, LanguageService :> es)
-    => HecoOps -> SomeImmanantContent -> Eff es Embedding
-embedImmanantContent ops (SomeImmanantContent mem) = do
-    embed ops.memoryOps.embeddingModel $ joinImmanantContent ":" mem
+    => HecoOps -> SomeImmanent -> Eff es Embedding
+embedImmanent ops (SomeImmanent mem) = do
+    embed ops.memoryOps.embeddingModel $ join ":" mem
 
-formatImmanantContents ::
-    HecoOps -> Vector SomeImmanantContent -> TLB.Builder
-formatImmanantContents ops contents = do
+formatImmanents ::
+    HecoOps -> Vector SomeImmanent -> TLB.Builder
+formatImmanents ops contents = do
     if V.length contents == 0
         then mempty
         else V.foldl accumulate mempty $ V.reverse contents
     where
         accumulate acc c =
             if acc == mempty
-                then ops.immanantContentFormatter c
-                else acc <> "\n\n" <> ops.immanantContentFormatter c
+                then ops.immanentFormatter c
+                else acc <> "\n\n" <> ops.immanentFormatter c
 
 timePhaseToMessasge ::
     ( HasCallStack
@@ -151,7 +152,7 @@ timePhaseToMessasge ops (TimePhase unique contents) = do
         Nothing -> do
             msg <- if V.length contents == 0
                 then newUserMessage ""
-                else case castImmanantContent $ contents V.! 0 of
+                else case castImmanent $ contents V.! 0 of
                     Just (TerminalReply _ msg) -> pure msg
                     _ -> createUserMsg contents
             modify $ LRU.insert unique msg
@@ -159,7 +160,7 @@ timePhaseToMessasge ops (TimePhase unique contents) = do
         Just msg -> pure msg
     where
         createUserMsg contents = do
-            let builder = formatImmanantContents ops contents
+            let builder = formatImmanents ops contents
                 content = TL.toStrict $ TLB.toLazyText builder
             newUserMessage content
 
@@ -167,8 +168,8 @@ associateMemory ::
     ( HasCallStack
     , DatabaseService :> es
     , LanguageService :> es
-    , InternalTimeStream :> es )
-    => HecoOps -> Eff es (Vector SomeImmanantContent)
+    , ImmanentTime :> es )
+    => HecoOps -> Eff es (Vector SomeImmanent)
 associateMemory ops = do
     TimePhase _ contents <- getPresent
     if V.length contents == 0
@@ -176,7 +177,7 @@ associateMemory ops = do
         else do
             let memoryOps = ops.memoryOps
                 collection = memoryOps.collectionName
-            embeddings <- contents & traverse (embedImmanantContent ops >=> (pure . DenseVectorData))
+            embeddings <- contents & traverse (embedImmanent ops >=> (pure . DenseVectorData))
             memEnts <- searchEntities @Memory collection memoryOps.searchOps embeddings
             pure $ V.map cast $ V.nubBy (\a b -> compare a.id b.id) memEnts
 
@@ -184,7 +185,7 @@ injectMemory ::
     ( HasCallStack
     , DatabaseService :> es
     , LanguageService :> es
-    , InternalTimeStream :> es )
+    , ImmanentTime :> es )
     => HecoOps -> Eff es ()
 injectMemory ops = associateMemory ops >>= present_
 
@@ -194,13 +195,13 @@ wrapInteraction ::
     , Concurrent :> es
     , DatabaseService :> es
     , LanguageService :> es
-    , LanguageToolProvider :> es
-    , InternalTimeStream :> es
+    , AgentToolProvider :> es
+    , ImmanentTime :> es
     , State (LRU Unique Message) :> es
     , Reader HecoInternal :> es
     , Reader QSem :> es
     , Event AgentEvent :> es
-    , Event InternalTimeStreamEvent :> es
+    , Event ImmanentTimeEvent :> es
     , Error LanguageError :> es
     , Error AgentError :> es )
     => HecoOps -> Maybe TimePhase -> Eff es a -> Eff es a
@@ -248,7 +249,7 @@ wrapInteraction ops replyingTimePhase eff = do
 
             trigger $ OnAgentInputMessagesGenerated messages
 
-            schemas <- getLanguageToolSchemas
+            schemas <- getAgentToolSchemas
             let chatOps = ops.chatOps { tools = schemas ++ ops.chatOps.tools }
             ((msg, prevMsgs), lostPhases2) <-
                 runReader (replyingTimePhase <|> Just present) $
@@ -330,7 +331,7 @@ wrapInteraction ops replyingTimePhase eff = do
                 unless (T.all isSpace statement) do
                     trySendReply statement
                 respMsgs <- forM toolCalls \t -> do
-                    result <- invokeLanguageTool t.name t.arguments
+                    result <- invokeAgentTool t.name t.arguments
                     let resp = ToolResponse
                             { id = t.id
                             , name = t.name
@@ -348,7 +349,7 @@ wrapInteraction ops replyingTimePhase eff = do
 
         trySendReply content =
             whenJustM ask \present ->
-                case TimePhase.getImmanantContent @Terminal present of
+                case TimePhase.getImmanent @Terminal present of
                     Just (TerminalChat id _) -> trigger $ OnAgentReply present id content
                     Just (TerminalTaskResponse id _ _) -> trigger $ OnAgentReply present id content
                     _ -> pure ()
@@ -359,10 +360,10 @@ runHecoAgent :: forall es a.
     , Concurrent :> es
     , DatabaseService :> es
     , LanguageService :> es
-    , LanguageToolProvider :> es
-    , InternalTimeStream :> es
+    , AgentToolProvider :> es
+    , ImmanentTime :> es
     , Event AgentEvent :> es
-    , Event InternalTimeStreamEvent :> es
+    , Event ImmanentTimeEvent :> es
     , Error AgentError :> es
     , Error LanguageError :> es )
     => HecoOps -> Eff (Agent : es) a -> Eff es a
@@ -386,12 +387,12 @@ runHecoAgentEx ::
     , Concurrent :> es
     , DatabaseService :> es
     , LanguageService :> es
-    , LanguageToolProvider :> es
-    , InternalTimeStream :> es
-    , Event InternalTimeStreamEvent :> es
+    , AgentToolProvider :> es
+    , ImmanentTime :> es
+    , Event ImmanentTimeEvent :> es
     , Error LanguageError :> es )
     => HecoOps
     -> Eff (Agent : Event AgentEvent : Error AgentError : es) a
-    -> Eff es (Either (CallStack, AgentError) a)
+    -> Eff es a
 runHecoAgentEx ops =
-    runError. runEvent . runHecoAgent ops
+    runErrorWith throwUnhandled . runEvent . runHecoAgent ops

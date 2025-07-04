@@ -1,7 +1,7 @@
 module Heco.Effectful.PortalService where
 
 import Heco.Data.Portal (Portal(..), PortalSignal(..))
-import Heco.Data.Immanant.Terminal (SessionId(..))
+import Heco.Data.Immanent.Terminal (SessionId(..))
 import Heco.Events.AgentEvent (AgentEvent(..))
 import Heco.Effectful.Event (Event, withEvent)
 

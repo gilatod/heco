@@ -44,16 +44,23 @@ library
   default-language: GHC2024
   hs-source-dirs: src
   exposed-modules:
-    Heco.Data.Immanant.Memory,
-    Heco.Data.Immanant.Terminal,
+    Heco.Data.Immanent.Memory,
+    Heco.Data.Immanent.Terminal,
     Heco.Data.AgentError,
+    Heco.Data.AgentTool,
+    Heco.Data.AgentToolRegistry,
+    Heco.Data.AgentToolError,
     Heco.Events.AgentEvent,
-    Heco.Effectful.Agent
+    Heco.Effectful.Agent,
+    Heco.Effectful.AgentToolProvider,
+    Heco.Effectful.AgentToolProvider.Native,
+    Heco.Effectful.AgentToolProvider.MCP,
   build-depends:
     base,
     extra,
     effectful-core,
     effectful-th,
+    unordered-containers,
     vector,
     unboxing-vector,
     text,
@@ -62,6 +69,7 @@ library
     hashable,
     cast,
     aeson,
+    heco-common,
     heco-multitask,
     heco-language,
     heco-database,

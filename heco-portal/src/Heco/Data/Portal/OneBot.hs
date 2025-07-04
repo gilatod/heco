@@ -4,11 +4,11 @@ import Heco.Network.HTTP.Client (Headers, httpPost)
 import Heco.Conduit.Concurrent (mergeSources)
 import Heco.Data.Aeson (defaultAesonOps)
 import Heco.Data.Portal (Portal(..), PortalSignal(..))
-import Heco.Data.TimePhase (ImmanantContent)
+import Heco.Data.Immanent (Immanent)
+import Heco.Data.Immanent.Terminal (Terminal(..))
 import Heco.Data.TimePhase qualified as TimePhase
-import Heco.Data.Immanant.Terminal (Terminal(..))
 import Heco.Effectful.HTTP (makeHttpManager)
-import Heco.Effectful.InternalTimeStream (InternalTimeStream, clearRetention, getRetention, presentList_)
+import Heco.Effectful.ImmanentTime (ImmanentTime, clearRetention, getRetention, presentList_)
 import Heco.Effectful.Agent (Agent, withAgentInteraction)
 
 import Effectful (Eff, IOE, type (:>), MonadIO(..))
@@ -94,7 +94,7 @@ data OneBotEvent = OneBotMessageEvent
     , message :: [OneBotMessagePart] }
     deriving (Show)
 
-instance ImmanantContent OneBotEvent
+instance Immanent OneBotEvent
 
 data OneBotSendingMessage
     = OneBotSendingPrivateMessage
@@ -160,7 +160,7 @@ makeOneBotPortal :: forall es.
     ( IOE :> es
     , Resource :> es
     , Concurrent :> es
-    , InternalTimeStream :> es
+    , ImmanentTime :> es
     , Agent :> es )
     => OneBotOps -> Portal (Eff es)
 makeOneBotPortal ops = Portal "onebot" \pid sigSrc -> do
@@ -212,7 +212,7 @@ makeOneBotPortal ops = Portal "onebot" \pid sigSrc -> do
 
         handleSigSrc tid httpMgr = C.awaitForever \case
             PortalReply phase msg -> do
-                whenJust (TimePhase.getImmanantContent @OneBotEvent phase) \event -> do
+                whenJust (TimePhase.getImmanent @OneBotEvent phase) \event -> do
                     liftIO $ T.putStrLn $ "[onebot] " <> event.message_type <> " / " <> msg
                     C.lift $ respond httpMgr event msg
             PortalClose -> C.lift $ killThread tid

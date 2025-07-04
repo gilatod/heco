@@ -15,6 +15,7 @@ import Heco.Data.Entity (EntityId(..), entityDataFields, Entity, SomeEntity(..))
 import Heco.Data.DatabaseError (DatabaseError(..))
 import Heco.Data.Collection (CollectionName(CollectionName))
 import Heco.Events.DatabaseEvent (DatabaseEvent(..))
+import Heco.Effectful.Exception (throwUnhandled)
 import Heco.Effectful.HTTP (evalHttpManager)
 import Heco.Effectful.DatabaseService
     ( SearchData,
@@ -26,7 +27,7 @@ import Heco.Effectful.Event (Event, trigger, runEvent)
 
 import Effectful (IOE, (:>), Eff, MonadIO (liftIO))
 import Effectful.Dispatch.Dynamic (HasCallStack, reinterpret)
-import Effectful.Error.Dynamic (Error, throwError, runError, CallStack)
+import Effectful.Error.Dynamic (Error, throwError, runErrorWith)
 import Effectful.Reader.Static (ask, Reader)
 
 import Network.HTTP.Client
@@ -437,6 +438,6 @@ runMilvusDatabaseServiceEx ::
     (HasCallStack, IOE :> es)
     => MilvusOps
     -> Eff (DatabaseService : Event DatabaseEvent : Error DatabaseError : es) a
-    -> Eff es (Either (CallStack, DatabaseError) a)
+    -> Eff es a
 runMilvusDatabaseServiceEx ops =
-    runError . runEvent . runMilvusDatabaseService ops
+    runErrorWith throwUnhandled . runEvent . runMilvusDatabaseService ops
